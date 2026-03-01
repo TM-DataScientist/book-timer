@@ -22,10 +22,25 @@ python -m venv .venv
 python -m pip install --upgrade pip tk
 ```
 
-## 使い方
+## 起動方法
+通常の実行:
 ```powershell
 python book_timer.py
 ```
+
+ダブルクリック起動:
+- ルートの `start_book_timer.cmd` をダブルクリックすると、`book_timer.py` を起動できます
+- `.venv\Scripts\python.exe` があればそれを優先し、なければ `py -3` または `python` を使います
+- Python が見つからない場合は、エラーメッセージを表示したまま停止します
+
+デスクトップショートカット作成:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\create_book_timer_shortcut.ps1
+```
+- 実行後、デスクトップに `Book Timer` ショートカットが作成されます
+- ショートカットは `start_book_timer.cmd` を参照するため、普段はデスクトップから起動できます
+
+## 使い方
 1. 開始時刻（`HH:MM`）・終了時刻・開始ページ・終了ページを入力
 2. コンソールに入力内容が表示され、GUI が起動
 3. 進捗ラベルに推定ページが表示され、1 分ごとに更新
@@ -35,6 +50,8 @@ python book_timer.py
 ```
 reading_books_timer/
 ├─ book_timer.py      # エントリーポイント（ロジック + Tkinter UI）
+├─ start_book_timer.cmd
+├─ create_book_timer_shortcut.ps1
 ├─ modules/           # 追加ロジックを切り出す場合に作成
 └─ assets/            # 画像・フォント・CSV 等のリソース（必要に応じて作成）
 ```
