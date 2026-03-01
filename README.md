@@ -33,6 +33,10 @@ python book_timer.py
 - `.venv\Scripts\python.exe` があればそれを優先し、なければ `py -3` または `python` を使います
 - Python が見つからない場合は、エラーメッセージを表示したまま停止します
 
+VSCode から起動:
+- `Ctrl+Shift+P` → `Tasks: Run Task` → `Run Book Timer` で起動できます
+- 設定ファイルは `.vscode/tasks.json` です
+
 デスクトップショートカット作成:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\create_book_timer_shortcut.ps1
@@ -52,6 +56,8 @@ reading_books_timer/
 ├─ book_timer.py      # エントリーポイント（ロジック + Tkinter UI）
 ├─ start_book_timer.cmd
 ├─ create_book_timer_shortcut.ps1
+├─ .vscode/
+│  └─ tasks.json
 ├─ modules/           # 追加ロジックを切り出す場合に作成
 └─ assets/            # 画像・フォント・CSV 等のリソース（必要に応じて作成）
 ```
