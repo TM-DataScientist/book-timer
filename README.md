@@ -1,15 +1,17 @@
 ﻿# Reading Books Timer
 
-デジタルと紙の読書時間を記録し、進捗をリアルタイムで可視化する Tkinter 製のタイマーです。日付・開始終了時刻・ページ数を入力すると、現在どこまで読めているかを分単位で推定します。
+デジタルと紙の読書時間を記録し、進捗をリアルタイムで可視化する Tkinter 製のタイマーです。書名・日付・開始終了時刻・ページ数を入力すると、現在どこまで読めているかを分単位で推定し、Googleカレンダーへ登録することもできます。
 
 ## スクリーンショット
 ![Reading Timer screenshot](assets/screenshot.png)
 
 ## 主な特徴
-- 日付・開始終了時刻・ページ範囲を入力するだけで読書セッションをセットアップ
+- 書名・日付・開始終了時刻・ページ範囲を入力するだけで読書セッションをセットアップ
 - 開始前・終了後の状態を自動判定し、残り時間や最終ページをガイド
 - 1 分ごとに推定ページを自動更新
-- 追加ライブラリ不要（標準 Tkinter のみ）
+- ウィンドウを閉じても前回の書名・日時・ページ入力を次回起動時に復元
+- Googleカレンダーへ読書予定を登録可能
+- タイマー本体は追加ライブラリ不要（Googleカレンダー連携時のみ追加インストールが必要）
 
 ## 動作環境
 - Python 3.10 以降推奨（Tkinter 同梱版）
@@ -17,15 +19,27 @@
 
 ## セットアップ
 ```powershell
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install --upgrade pip tk
+uv sync
 ```
+
+ランタイム依存関係だけでよい場合:
+```powershell
+uv sync --no-dev
+```
+
+- `uv sync` は `.venv` の作成も兼ねます
+- Tkinter は Windows の CPython に同梱される前提です
+- Googleカレンダー連携の依存関係は `pyproject.toml` で管理しています
 
 ## 起動方法
 通常の実行:
 ```powershell
-python book_timer.py
+uv run python book_timer.py
+```
+
+または:
+```powershell
+uv run python -m book_timer
 ```
 
 ダブルクリック起動:
@@ -45,11 +59,25 @@ powershell -ExecutionPolicy Bypass -File .\create_book_timer_shortcut.ps1
 - ショートカットは `start_book_timer.cmd` を参照するため、普段はデスクトップから起動できます
 
 ## 使い方
-1. ウィンドウ上で日付（`YYYY-MM-DD`、初期値は起動日）・開始時刻（初期値 `08:00`）・終了時刻（初期値 `24:00`）・開始ページ・終了ページを入力
+1. ウィンドウ上で書名・日付（`YYYY-MM-DD`、初期値は起動日）・開始時刻（初期値 `08:00`）・終了時刻（初期値 `24:00`）・開始ページ・終了ページを入力
    終了時刻には `24:00` も使えます
 2. `反映` を押すか `Enter` を押してセッションを反映
 3. 進捗ラベルに推定ページが表示され、1 分ごとに更新
-4. 終了予定時刻を過ぎると最終ページ確認のメッセージを表示
+4. `Googleカレンダーに登録` を押すと、書名とページ範囲を含む予定を Google カレンダーへ登録
+5. ウィンドウを閉じると現在の入力内容を保存し、次回起動時に復元
+6. 終了予定時刻を過ぎると最終ページ確認のメッセージを表示
+
+## Googleカレンダー連携
+1. Google Cloud でプロジェクトを作成し、Google Calendar API を有効化
+2. OAuth クライアントを `Desktop app` で作成
+3. ダウンロードした OAuth クライアント JSON を、このリポジトリ直下に `credentials.json` という名前で配置
+4. アプリから `Googleカレンダーに登録` を押し、初回のみブラウザでログインして許可
+5. 認証後は `token.json` が自動作成され、以後は再利用
+
+- 認証情報ファイルの `credentials.json` と `token.json` は `.gitignore` 済みです
+- Google からダウンロードした OAuth クライアント JSON も `.gitignore` 済みです
+- 入力内容の復元用ファイル `.book_timer_state.json` も `.gitignore` 済みです
+- 認証に失敗した場合は `token.json` を削除してやり直してください
 
 ## プロジェクト構成
 ```
@@ -59,7 +87,9 @@ reading_books_timer/
 ├─ create_book_timer_shortcut.ps1
 ├─ .vscode/
 │  └─ tasks.json
-├─ modules/           # 追加ロジックを切り出す場合に作成
+├─ modules/
+│  ├─ google_calendar.py   # Google Calendar API 連携
+│  └─ session_state.py     # 入力内容の保存と復元
 └─ assets/            # 画像・フォント・CSV 等のリソース（必要に応じて作成）
 ```
 
@@ -73,11 +103,11 @@ reading_books_timer/
 
 ### テスト & 検証
 - メイン: 手動検証  
-  `python book_timer.py` を実行し、開始前／進行中／終了後で表示が正しいか確認  
+  `uv run python book_timer.py` を実行し、開始前／進行中／終了後で表示が正しいか確認  
   `24:00` 指定時にクラッシュせず継続することも確認
 - 自動テスト（任意）: `tests/test_*.py` を追加し、計算関数を GUI から切り離して検証  
   ```powershell
-  python -m pytest
+  uv run pytest
   ```
 
 ## 今後のアイデア

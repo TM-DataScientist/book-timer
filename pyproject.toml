@@ -1,0 +1,19 @@
+[project]
+name = "reading-books-timer"
+version = "0.1.0"
+description = "Tkinter reading timer with optional Google Calendar integration."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-api-python-client>=2.170.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]
+
+[tool.uv]
+package = false
