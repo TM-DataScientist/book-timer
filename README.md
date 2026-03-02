@@ -45,9 +45,9 @@ powershell -ExecutionPolicy Bypass -File .\create_book_timer_shortcut.ps1
 - ショートカットは `start_book_timer.cmd` を参照するため、普段はデスクトップから起動できます
 
 ## 使い方
-1. 開始時刻（`HH:MM`）・終了時刻・開始ページ・終了ページを入力
+1. ウィンドウ上で開始時刻（`HH:MM`）・終了時刻・開始ページ・終了ページを入力
    終了時刻には `24:00` も使えます
-2. コンソールに入力内容が表示され、GUI が起動
+2. `Apply` を押すか `Enter` を押してセッションを反映
 3. 進捗ラベルに推定ページが表示され、1 分ごとに更新
 4. 終了予定時刻を過ぎると「Reading session finished. Review final page …」と通知
 
