@@ -70,7 +70,8 @@ powershell -ExecutionPolicy Bypass -File .\create_book_timer_shortcut.ps1
 ## Googleカレンダー連携
 1. Google Cloud でプロジェクトを作成し、Google Calendar API を有効化
 2. OAuth クライアントを `Desktop app` で作成
-3. ダウンロードした OAuth クライアント JSON を、このリポジトリ直下に `credentials.json` という名前で配置
+3. ダウンロードした OAuth クライアント JSON を、このリポジトリ直下に配置
+   `credentials.json` でも、Google が生成した `client_secret_...json` のままでも読み取れます
 4. アプリから `Googleカレンダーに登録` を押し、初回のみブラウザでログインして許可
 5. 認証後は `token.json` が自動作成され、以後は再利用
 

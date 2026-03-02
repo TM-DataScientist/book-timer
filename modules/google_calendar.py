@@ -7,6 +7,11 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 DEFAULT_CALENDAR_ID = "primary"
 DEFAULT_CREDENTIALS_PATH = Path("credentials.json")
 DEFAULT_TOKEN_PATH = Path("token.json")
+CREDENTIALS_GLOB_PATTERNS = (
+    "credentials.json",
+    "client_secret_*.json",
+    "*.apps.googleusercontent.com.json",
+)
 DEPENDENCY_MESSAGE = (
     "Google Calendar連携を使うには "
     "`python -m pip install --upgrade "
@@ -91,15 +96,18 @@ def _load_credentials(credentials_path: Path, token_path: Path):
                 "Google認証の更新に失敗しました。`token.json` を削除して再認証してください。"
             ) from exc
     else:
-        if not credentials_path.exists():
+        resolved_credentials_path = _resolve_credentials_path(credentials_path)
+
+        if resolved_credentials_path is None:
             raise GoogleCalendarIntegrationError(
-                "`credentials.json` が見つかりません。Google Cloud で Desktop app の OAuth "
-                "クライアントを作成し、このフォルダに配置してください。"
+                "OAuth クライアント JSON が見つかりません。Google Cloud で Desktop app "
+                "の OAuth クライアントを作成し、`credentials.json` または "
+                "`client_secret_...json` をこのフォルダに配置してください。"
             )
 
         try:
             flow = installed_app_flow_cls.from_client_secrets_file(
-                str(credentials_path),
+                str(resolved_credentials_path),
                 SCOPES,
             )
             credentials = flow.run_local_server(port=0)
@@ -137,6 +145,21 @@ def _import_google_calendar_client():
         raise GoogleCalendarIntegrationError(DEPENDENCY_MESSAGE) from exc
 
     return build, HttpError
+
+
+def _resolve_credentials_path(credentials_path: Path) -> Path | None:
+    """Resolve the OAuth client JSON from explicit and common downloaded filenames."""
+    if credentials_path.exists():
+        return credentials_path
+
+    parent_dir = credentials_path.parent if credentials_path.parent != Path("") else Path(".")
+
+    for pattern in CREDENTIALS_GLOB_PATTERNS:
+        matches = sorted(parent_dir.glob(pattern))
+        if matches:
+            return matches[0]
+
+    return None
 
 
 def _to_rfc3339(value: datetime) -> str:
