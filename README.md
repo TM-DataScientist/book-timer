@@ -46,6 +46,7 @@ powershell -ExecutionPolicy Bypass -File .\create_book_timer_shortcut.ps1
 
 ## 使い方
 1. 開始時刻（`HH:MM`）・終了時刻・開始ページ・終了ページを入力
+   終了時刻には `24:00` も使えます
 2. コンソールに入力内容が表示され、GUI が起動
 3. 進捗ラベルに推定ページが表示され、1 分ごとに更新
 4. 終了予定時刻を過ぎると「Reading session finished. Review final page …」と通知
@@ -72,7 +73,8 @@ reading_books_timer/
 
 ### テスト & 検証
 - メイン: 手動検証  
-  `python book_timer.py` を実行し、開始前／進行中／終了後で表示が正しいか確認
+  `python book_timer.py` を実行し、開始前／進行中／終了後で表示が正しいか確認  
+  `24:00` 指定時にクラッシュせず継続することも確認
 - 自動テスト（任意）: `tests/test_*.py` を追加し、計算関数を GUI から切り離して検証  
   ```powershell
   python -m pytest
