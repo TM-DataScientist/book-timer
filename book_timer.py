@@ -3,11 +3,22 @@ from tkinter import font as tkfont
 from datetime import datetime, timedelta
 
 DEFAULT_WIDTH = 520
-DEFAULT_HEIGHT = 360
+DEFAULT_HEIGHT = 400
+DATE_FORMAT = "%Y-%m-%d"
 TIME_FORMAT = "%H:%M"
-EMPTY_TIME_TEXT = "Start --:-- / End --:--"
-EMPTY_PAGE_TEXT = "Pages -- -> --"
-READY_TEXT = "Enter session details and click Apply."
+APP_TITLE = "読書タイマー"
+SETUP_TITLE = "セッション設定"
+DATE_LABEL = "日付"
+START_TIME_LABEL = "開始時刻"
+END_TIME_LABEL = "終了時刻"
+START_PAGE_LABEL = "開始ページ"
+END_PAGE_LABEL = "終了ページ"
+APPLY_LABEL = "反映"
+EMPTY_TIME_TEXT = "日付 ----/--/-- / 開始 --:-- / 終了 --:--"
+EMPTY_PAGE_TEXT = "ページ -- -> --"
+READY_TEXT = "読書セッションを入力して「反映」を押してください。"
+DEFAULT_START_TIME = "08:00"
+DEFAULT_END_TIME = "24:00"
 
 
 def parse_time_on_date(time_text: str, reference: datetime) -> datetime:
@@ -27,61 +38,76 @@ def parse_time_on_date(time_text: str, reference: datetime) -> datetime:
     )
 
 
+def parse_session_date(date_text: str) -> datetime:
+    """Parse YYYY-MM-DD text and return the date at midnight."""
+    try:
+        parsed = datetime.strptime(date_text.strip(), DATE_FORMAT)
+    except ValueError as exc:
+        raise ValueError("日付は YYYY-MM-DD 形式で入力してください。") from exc
+
+    return parsed.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def parse_page(page_text: str, label: str) -> int:
     """Convert page input to an integer with a readable validation message."""
     try:
         return int(page_text.strip())
     except ValueError as exc:
-        raise ValueError(f"{label} must be an integer.") from exc
+        raise ValueError(f"{label}は整数で入力してください。") from exc
 
 
 def validate_session_inputs(
+    session_date: str,
     start_time: str,
     end_time: str,
     start_page: int,
     end_page: int,
-    reference: datetime | None = None,
 ) -> tuple[datetime, datetime]:
     """Validate time/page inputs and return parsed datetimes."""
-    if reference is None:
-        reference = datetime.now()
+    session_reference = parse_session_date(session_date)
 
     try:
-        start_dt = parse_time_on_date(start_time, reference)
-        end_dt = parse_time_on_date(end_time, reference)
+        start_dt = parse_time_on_date(start_time, session_reference)
+        end_dt = parse_time_on_date(end_time, session_reference)
     except ValueError as exc:
-        raise ValueError("Use time format HH:MM. Enter 24:00 only for midnight.") from exc
+        raise ValueError("時刻は HH:MM 形式で入力してください。24:00 は深夜 0 時として扱います。") from exc
 
     if end_dt <= start_dt:
-        raise ValueError("End time must be after the start time.")
+        raise ValueError("終了時刻は開始時刻より後にしてください。")
 
     if end_page < start_page:
-        raise ValueError("End page must be greater than or equal to the start page.")
+        raise ValueError("終了ページは開始ページ以上にしてください。")
 
     return start_dt, end_dt
 
 
-def calculate_pages(start_time: str, end_time: str, start_page: int, end_page: int) -> str:
+def calculate_pages(
+    session_date: str,
+    start_time: str,
+    end_time: str,
+    start_page: int,
+    end_page: int,
+) -> str:
     """Return a friendly status message describing the current reading progress."""
     now = datetime.now()
 
     try:
         start_dt, end_dt = validate_session_inputs(
+            session_date,
             start_time,
             end_time,
             start_page,
             end_page,
-            now,
         )
     except ValueError as exc:
         return str(exc)
 
     if now < start_dt:
         minutes = int((start_dt - now).total_seconds() // 60)
-        return f"Reading begins in {minutes} minute(s)."
+        return f"読書開始まであと {minutes} 分です。"
 
     if now >= end_dt:
-        return f"Reading session finished. Review final page {end_page}."
+        return f"読書セッションは終了しました。最終ページ {end_page} を確認してください。"
 
     total_minutes = (end_dt - start_dt).total_seconds()
     elapsed_minutes = (now - start_dt).total_seconds()
@@ -91,59 +117,66 @@ def calculate_pages(start_time: str, end_time: str, start_page: int, end_page: i
     current_page = start_page + int(total_pages * progress)
     current_page = min(max(current_page, start_page), end_page)
 
-    return f"Estimated position: page {current_page}."
+    return f"現在の推定位置: {current_page} ページ"
 
 
 def run_app() -> None:
     """Create and run the Tkinter application."""
     root = tk.Tk()
-    root.title("Reading Timer")
+    root.title(APP_TITLE)
     root.geometry(f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}")
-    root.minsize(420, 320)
+    root.minsize(420, 360)
     root.resizable(True, True)
 
     info_font = tkfont.Font(family="Helvetica", size=12)
     progress_font = tkfont.Font(family="Helvetica", size=14)
-    start_time_var = tk.StringVar()
-    end_time_var = tk.StringVar()
+    date_var = tk.StringVar(value=datetime.now().strftime(DATE_FORMAT))
+    start_time_var = tk.StringVar(value=DEFAULT_START_TIME)
+    end_time_var = tk.StringVar(value=DEFAULT_END_TIME)
     start_page_var = tk.StringVar()
     end_page_var = tk.StringVar()
     error_var = tk.StringVar()
     time_label_var = tk.StringVar(value=EMPTY_TIME_TEXT)
     page_label_var = tk.StringVar(value=EMPTY_PAGE_TEXT)
-    current_session: tuple[str, str, int, int] | None = None
+    current_session: tuple[str, str, str, int, int] | None = None
     scheduled_update_id: str | None = None
 
-    form_frame = tk.LabelFrame(root, text="Session Setup", padx=12, pady=12)
+    form_frame = tk.LabelFrame(root, text=SETUP_TITLE, padx=12, pady=12)
     form_frame.pack(fill="x", padx=16, pady=(16, 8))
     form_frame.columnconfigure(1, weight=1)
     form_frame.columnconfigure(3, weight=1)
 
-    tk.Label(form_frame, text="Start time", font=info_font).grid(
+    tk.Label(form_frame, text=DATE_LABEL, font=info_font).grid(
         row=0, column=0, padx=(0, 8), pady=4, sticky="w"
     )
-    start_time_entry = tk.Entry(form_frame, textvariable=start_time_var, font=info_font)
-    start_time_entry.grid(row=0, column=1, padx=(0, 12), pady=4, sticky="ew")
-
-    tk.Label(form_frame, text="End time", font=info_font).grid(
-        row=0, column=2, padx=(0, 8), pady=4, sticky="w"
+    tk.Entry(form_frame, textvariable=date_var, font=info_font).grid(
+        row=0, column=1, columnspan=3, pady=4, sticky="ew"
     )
-    tk.Entry(form_frame, textvariable=end_time_var, font=info_font).grid(
-        row=0, column=3, pady=4, sticky="ew"
-    )
-
-    tk.Label(form_frame, text="Start page", font=info_font).grid(
+    tk.Label(form_frame, text=START_TIME_LABEL, font=info_font).grid(
         row=1, column=0, padx=(0, 8), pady=4, sticky="w"
     )
-    tk.Entry(form_frame, textvariable=start_page_var, font=info_font).grid(
-        row=1, column=1, padx=(0, 12), pady=4, sticky="ew"
-    )
+    start_time_entry = tk.Entry(form_frame, textvariable=start_time_var, font=info_font)
+    start_time_entry.grid(row=1, column=1, padx=(0, 12), pady=4, sticky="ew")
 
-    tk.Label(form_frame, text="End page", font=info_font).grid(
+    tk.Label(form_frame, text=END_TIME_LABEL, font=info_font).grid(
         row=1, column=2, padx=(0, 8), pady=4, sticky="w"
     )
-    tk.Entry(form_frame, textvariable=end_page_var, font=info_font).grid(
+    tk.Entry(form_frame, textvariable=end_time_var, font=info_font).grid(
         row=1, column=3, pady=4, sticky="ew"
+    )
+
+    tk.Label(form_frame, text=START_PAGE_LABEL, font=info_font).grid(
+        row=2, column=0, padx=(0, 8), pady=4, sticky="w"
+    )
+    tk.Entry(form_frame, textvariable=start_page_var, font=info_font).grid(
+        row=2, column=1, padx=(0, 12), pady=4, sticky="ew"
+    )
+
+    tk.Label(form_frame, text=END_PAGE_LABEL, font=info_font).grid(
+        row=2, column=2, padx=(0, 8), pady=4, sticky="w"
+    )
+    tk.Entry(form_frame, textvariable=end_page_var, font=info_font).grid(
+        row=2, column=3, pady=4, sticky="ew"
     )
 
     info_frame = tk.Frame(root)
@@ -192,24 +225,27 @@ def run_app() -> None:
     def apply_session(event=None) -> None:
         nonlocal current_session
 
+        session_date = date_var.get().strip()
         start_time = start_time_var.get().strip()
         end_time = end_time_var.get().strip()
 
         try:
-            start_page = parse_page(start_page_var.get(), "Start page")
-            end_page = parse_page(end_page_var.get(), "End page")
-            validate_session_inputs(start_time, end_time, start_page, end_page)
+            start_page = parse_page(start_page_var.get(), START_PAGE_LABEL)
+            end_page = parse_page(end_page_var.get(), END_PAGE_LABEL)
+            validate_session_inputs(
+                session_date, start_time, end_time, start_page, end_page
+            )
         except ValueError as exc:
             error_var.set(str(exc))
             return
 
-        current_session = (start_time, end_time, start_page, end_page)
-        time_label_var.set(f"Start {start_time} / End {end_time}")
-        page_label_var.set(f"Pages {start_page} -> {end_page}")
+        current_session = (session_date, start_time, end_time, start_page, end_page)
+        time_label_var.set(f"日付 {session_date} / 開始 {start_time} / 終了 {end_time}")
+        page_label_var.set(f"ページ {start_page} -> {end_page}")
         error_var.set("")
         schedule_progress_update(0)
 
-    apply_button = tk.Button(root, text="Apply", font=info_font, command=apply_session)
+    apply_button = tk.Button(root, text=APPLY_LABEL, font=info_font, command=apply_session)
     apply_button.pack(pady=(0, 8))
 
     def update_progress() -> None:
@@ -220,21 +256,22 @@ def run_app() -> None:
             progress_label.config(text=READY_TEXT)
             return
 
-        start_time, end_time, start_page, end_page = current_session
+        session_date, start_time, end_time, start_page, end_page = current_session
         progress_label.config(
-            text=calculate_pages(start_time, end_time, start_page, end_page)
+            text=calculate_pages(
+                session_date, start_time, end_time, start_page, end_page
+            )
         )
 
-        now = datetime.now()
         _, end_dt = validate_session_inputs(
+            session_date,
             start_time,
             end_time,
             start_page,
             end_page,
-            now,
         )
 
-        if now < end_dt:
+        if datetime.now() < end_dt:
             scheduled_update_id = root.after(60000, update_progress)
 
     def adjust_layout(event=None) -> None:
