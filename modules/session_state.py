@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 DEFAULT_STATE_PATH = Path(".book_timer_state.json")
+BOOKS_FIELD = "books"
 STATE_FIELDS = (
     "book_title",
     "session_date",
@@ -20,16 +21,7 @@ class SessionStateError(RuntimeError):
 
 def load_form_state(state_path: Path = DEFAULT_STATE_PATH) -> dict[str, str]:
     """Load the previously saved form values, if available."""
-    if not state_path.exists():
-        return {}
-
-    try:
-        data = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-    if not isinstance(data, dict):
-        return {}
+    data = _load_state_data(state_path)
 
     return {
         field: _normalize_value(data.get(field))
@@ -38,15 +30,23 @@ def load_form_state(state_path: Path = DEFAULT_STATE_PATH) -> dict[str, str]:
     }
 
 
+def load_book_titles(state_path: Path = DEFAULT_STATE_PATH) -> list[str]:
+    """Load the saved book title choices for the dropdown."""
+    data = _load_state_data(state_path)
+    return _normalize_book_titles(data.get(BOOKS_FIELD))
+
+
 def save_form_state(
     form_state: dict[str, str],
+    book_titles: list[str] | None = None,
     state_path: Path = DEFAULT_STATE_PATH,
 ) -> None:
     """Persist the current form values for the next launch."""
-    payload = {
+    payload: dict[str, object] = {
         field: _normalize_value(form_state.get(field, ""))
         for field in STATE_FIELDS
     }
+    payload[BOOKS_FIELD] = _normalize_book_titles(book_titles)
 
     try:
         state_path.write_text(
@@ -64,3 +64,35 @@ def _normalize_value(value: object) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _load_state_data(state_path: Path) -> dict[str, object]:
+    """Read the JSON state payload if it exists and is well-formed."""
+    if not state_path.exists():
+        return {}
+
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    return data
+
+
+def _normalize_book_titles(value: object) -> list[str]:
+    """Normalize a persisted book list into unique, non-empty strings."""
+    if not isinstance(value, list):
+        return []
+
+    normalized_titles: list[str] = []
+
+    for item in value:
+        title = _normalize_value(item).strip()
+        if title and title not in normalized_titles:
+            normalized_titles.append(title)
+
+    normalized_titles.sort(key=str.casefold)
+    return normalized_titles

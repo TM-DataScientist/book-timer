@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import font as tkfont
+from tkinter import ttk
 from datetime import datetime, timedelta
 
 from modules.google_calendar import (
@@ -8,6 +9,7 @@ from modules.google_calendar import (
 )
 from modules.session_state import (
     SessionStateError,
+    load_book_titles,
     load_form_state,
     save_form_state,
 )
@@ -26,12 +28,14 @@ START_PAGE_LABEL = "開始ページ"
 END_PAGE_LABEL = "終了ページ"
 APPLY_LABEL = "反映"
 REGISTER_CALENDAR_LABEL = "Googleカレンダーに登録"
+DELETE_BOOK_LABEL = "削除"
 EMPTY_BOOK_TEXT = "書名 --"
 EMPTY_TIME_TEXT = "日付 ----/--/-- / 開始 --:-- / 終了 --:--"
 EMPTY_PAGE_TEXT = "ページ -- -> --"
 READY_TEXT = "読書セッションを入力して「反映」を押してください。"
 CALENDAR_PROGRESS_TEXT = "Googleカレンダーへ登録中です..."
 CALENDAR_SUCCESS_TEXT = "Googleカレンダーに登録しました。"
+BOOK_DELETED_TEXT = "書名一覧から削除しました。"
 DEFAULT_START_TIME = "08:00"
 DEFAULT_END_TIME = "24:00"
 
@@ -162,6 +166,7 @@ def calculate_pages(
 def run_app() -> None:
     """Create and run the Tkinter application."""
     saved_form_state = load_form_state()
+    saved_book_titles = load_book_titles()
 
     root = tk.Tk()
     root.title(APP_TITLE)
@@ -171,6 +176,15 @@ def run_app() -> None:
 
     info_font = tkfont.Font(family="Helvetica", size=12)
     progress_font = tkfont.Font(family="Helvetica", size=14)
+    combobox_style = ttk.Style(root)
+    combobox_style.configure("BookTimer.TCombobox", font=("Helvetica", 12))
+    book_titles = list(saved_book_titles)
+
+    saved_book_title = saved_form_state.get("book_title", "").strip()
+    if saved_book_title and saved_book_title not in book_titles:
+        book_titles.append(saved_book_title)
+        book_titles.sort(key=str.casefold)
+
     book_title_var = tk.StringVar(value=saved_form_state.get("book_title", ""))
     date_var = tk.StringVar(
         value=saved_form_state.get(
@@ -195,13 +209,33 @@ def run_app() -> None:
     form_frame = tk.LabelFrame(root, text=SETUP_TITLE, padx=12, pady=12)
     form_frame.pack(fill="x", padx=16, pady=(16, 8))
     form_frame.columnconfigure(1, weight=1)
+    form_frame.columnconfigure(2, weight=1)
     form_frame.columnconfigure(3, weight=1)
 
     tk.Label(form_frame, text=BOOK_TITLE_LABEL, font=info_font).grid(
         row=0, column=0, padx=(0, 8), pady=4, sticky="w"
     )
-    book_title_entry = tk.Entry(form_frame, textvariable=book_title_var, font=info_font)
-    book_title_entry.grid(row=0, column=1, columnspan=3, pady=4, sticky="ew")
+    book_title_combobox = ttk.Combobox(
+        form_frame,
+        textvariable=book_title_var,
+        values=tuple(book_titles),
+        style="BookTimer.TCombobox",
+    )
+    book_title_combobox.grid(
+        row=0,
+        column=1,
+        columnspan=2,
+        padx=(0, 12),
+        pady=4,
+        sticky="ew",
+    )
+    delete_book_button = tk.Button(
+        form_frame,
+        text=DELETE_BOOK_LABEL,
+        font=info_font,
+        command=lambda: delete_selected_book(),
+    )
+    delete_book_button.grid(row=0, column=3, pady=4, sticky="ew")
 
     tk.Label(form_frame, text=DATE_LABEL, font=info_font).grid(
         row=1, column=0, padx=(0, 8), pady=4, sticky="w"
@@ -319,8 +353,20 @@ def run_app() -> None:
             "end_page": end_page_var.get().strip(),
         }
 
+    def update_book_title_choices() -> None:
+        book_title_combobox["values"] = tuple(book_titles)
+
+    def remember_book_title(book_title: str) -> None:
+        normalized_title = book_title.strip()
+        if not normalized_title or normalized_title in book_titles:
+            return
+
+        book_titles.append(normalized_title)
+        book_titles.sort(key=str.casefold)
+        update_book_title_choices()
+
     def persist_form_state() -> None:
-        save_form_state(get_form_state())
+        save_form_state(get_form_state(), book_titles)
 
     def set_session_state(
         book_title: str,
@@ -355,6 +401,7 @@ def run_app() -> None:
             calendar_status_var.set("")
             return
 
+        remember_book_title(book_title)
         set_session_state(book_title, session_values)
         calendar_status_var.set("")
 
@@ -362,6 +409,34 @@ def run_app() -> None:
             persist_form_state()
         except SessionStateError as exc:
             error_var.set(str(exc))
+            return
+
+    def delete_selected_book() -> None:
+        selected_title = book_title_var.get().strip()
+        if not selected_title:
+            error_var.set("削除する書名を選択してください。")
+            calendar_status_var.set("")
+            return
+
+        if selected_title not in book_titles:
+            error_var.set("その書名は一覧にありません。")
+            calendar_status_var.set("")
+            return
+
+        book_titles.remove(selected_title)
+        update_book_title_choices()
+        book_title_var.set("")
+        error_var.set("")
+        calendar_status_var.set(BOOK_DELETED_TEXT)
+
+        if book_label_var.get() == f"書名 {selected_title}":
+            book_label_var.set(EMPTY_BOOK_TEXT)
+
+        try:
+            persist_form_state()
+        except SessionStateError as exc:
+            error_var.set(str(exc))
+            calendar_status_var.set("")
             return
 
     def register_calendar_event() -> None:
@@ -372,6 +447,7 @@ def run_app() -> None:
         try:
             book_title, session_values = read_form_values()
             calendar_book_title = parse_book_title(book_title)
+            remember_book_title(book_title)
             set_session_state(book_title, session_values)
             session_date, start_time, end_time, start_page, end_page = session_values
             start_dt, end_dt = validate_session_inputs(
@@ -445,6 +521,10 @@ def run_app() -> None:
 
         info_font.configure(size=scaled_size(12, 9))
         progress_font.configure(size=scaled_size(14, 11))
+        combobox_style.configure(
+            "BookTimer.TCombobox",
+            font=("Helvetica", scaled_size(12, 9)),
+        )
         progress_label.config(wraplength=max(int(width * 0.85), 220))
         error_label.config(wraplength=max(int(width * 0.85), 220))
         calendar_status_label.config(wraplength=max(int(width * 0.85), 220))
@@ -478,7 +558,7 @@ def run_app() -> None:
     root.after(0, adjust_layout)
     root.after(0, restore_saved_session)
     root.protocol("WM_DELETE_WINDOW", handle_close)
-    book_title_entry.focus_set()
+    book_title_combobox.focus_set()
     root.mainloop()
 
 
