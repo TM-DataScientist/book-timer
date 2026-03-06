@@ -41,7 +41,7 @@ def create_reading_event(
     credentials = _load_credentials(credentials_path, token_path)
     service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
     event_body = {
-        "summary": f"読書: {book_title}",
+        "summary": _build_event_summary(book_title, start_page, end_page),
         "description": "\n".join(
             [
                 f"書名: {book_title}",
@@ -165,3 +165,8 @@ def _resolve_credentials_path(credentials_path: Path) -> Path | None:
 def _to_rfc3339(value: datetime) -> str:
     """Convert a local datetime to the RFC3339 string accepted by Google Calendar."""
     return value.astimezone().isoformat(timespec="seconds")
+
+
+def _build_event_summary(book_title: str, start_page: int, end_page: int) -> str:
+    """Build a concise calendar title with page range."""
+    return f"読書：{book_title}(P.{start_page}-{end_page})"
