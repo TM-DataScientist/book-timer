@@ -3,7 +3,7 @@
 デジタルと紙の読書時間を記録し、進捗をリアルタイムで可視化する Tkinter 製のタイマーです。書名・日付・開始終了時刻・ページ数を入力すると、現在どこまで読めているかを分単位で推定し、Googleカレンダーへ登録することもできます。
 
 ## スクリーンショット
-![Reading Timer screenshot](assets/screenshot.png)
+![Reading Timer screenshot](assets/image.png)
 
 ## 主な特徴
 - 書名・日付・開始終了時刻・ページ範囲を入力するだけで読書セッションをセットアップ
