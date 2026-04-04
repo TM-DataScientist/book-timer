@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .book_timer_state.json
+data/*.parquet
 credentials.json
 token.json
 client_secret_*.json

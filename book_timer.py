@@ -9,11 +9,16 @@ from modules.google_calendar import (
     GoogleCalendarIntegrationError,
     create_reading_event,
 )
+from modules.reading_history_store import (
+    ReadingHistoryStoreError,
+    load_reading_history,
+    normalize_reading_history,
+    save_reading_history,
+)
 from modules.session_state import (
     SessionStateError,
     load_book_titles,
     load_form_state,
-    load_reading_history,
     save_form_state,
 )
 
@@ -116,6 +121,11 @@ def format_reading_history_entry(entry: dict[str, str]) -> str:
     return f"{entry['session_date']}  {entry['book_title']}"
 
 
+def normalize_session_date(date_text: str) -> str:
+    """Normalize a supported date input to YYYY-MM-DD."""
+    return parse_session_date(date_text).strftime(DATE_FORMAT)
+
+
 def validate_session_inputs(
     session_date: str,
     start_time: str,
@@ -200,7 +210,13 @@ def run_app() -> None:
     """Create and run the Tkinter application."""
     saved_form_state = load_form_state()
     saved_book_titles = load_book_titles()
-    saved_reading_history = load_reading_history()
+    startup_error_message = ""
+
+    try:
+        saved_reading_history = load_reading_history()
+    except ReadingHistoryStoreError as exc:
+        saved_reading_history = []
+        startup_error_message = str(exc)
 
     root = tk.Tk()
     root.title(APP_TITLE)
@@ -233,7 +249,7 @@ def run_app() -> None:
     end_time_var = tk.StringVar(value=saved_form_state.get("end_time", DEFAULT_END_TIME))
     start_page_var = tk.StringVar(value=saved_form_state.get("start_page", ""))
     end_page_var = tk.StringVar(value=saved_form_state.get("end_page", ""))
-    error_var = tk.StringVar()
+    error_var = tk.StringVar(value=startup_error_message)
     calendar_status_var = tk.StringVar()
     book_label_var = tk.StringVar(value=EMPTY_BOOK_TEXT)
     time_label_var = tk.StringVar(value=EMPTY_TIME_TEXT)
@@ -455,7 +471,10 @@ def run_app() -> None:
         update_book_title_choices()
 
     def persist_form_state() -> None:
-        save_form_state(get_form_state(), book_titles, reading_history)
+        save_form_state(get_form_state(), book_titles)
+
+    def persist_reading_history(history_entries: list[dict[str, str]]) -> None:
+        save_reading_history(history_entries)
 
     def refresh_reading_history_display() -> None:
         latest_reading_var.set(build_latest_reading_text(reading_history))
@@ -471,8 +490,7 @@ def run_app() -> None:
     def add_reading_history_entry() -> None:
         try:
             book_title = parse_book_title(book_title_var.get())
-            session_date = date_var.get().strip()
-            parse_session_date(session_date)
+            session_date = normalize_session_date(date_var.get().strip())
         except ValueError as exc:
             error_var.set(str(exc))
             calendar_status_var.set("")
@@ -484,35 +502,20 @@ def run_app() -> None:
             "book_title": book_title,
         }
 
-        duplicate_index = next(
-            (
-                index
-                for index, saved_entry in enumerate(reading_history)
-                if saved_entry["session_date"] == session_date
-                and saved_entry["book_title"].casefold() == book_title.casefold()
-            ),
-            None,
-        )
-        if duplicate_index is not None:
-            reading_history.pop(duplicate_index)
+        try:
+            updated_history = normalize_reading_history(reading_history + [entry])
+            persist_reading_history(updated_history)
+            persist_form_state()
+        except (ReadingHistoryStoreError, SessionStateError) as exc:
+            error_var.set(str(exc))
+            calendar_status_var.set("")
+            return
 
-        reading_history.append(entry)
-        reading_history.sort(
-            key=lambda saved_entry: (
-                saved_entry["session_date"],
-                saved_entry["book_title"].casefold(),
-            ),
-            reverse=True,
-        )
+        reading_history.clear()
+        reading_history.extend(updated_history)
         refresh_reading_history_display()
         calendar_status_var.set(READING_HISTORY_SUCCESS_TEXT)
         error_var.set("")
-
-        try:
-            persist_form_state()
-        except SessionStateError as exc:
-            error_var.set(str(exc))
-            calendar_status_var.set("")
 
     def start_calendar_registration_worker(
         book_title: str,

@@ -2,9 +2,10 @@
 
 ## 2026-04-05
 
-- 読了履歴を `.book_timer_state.json` に保存し、最新読了と一覧を再起動後も復元できるよう改善
+- 読了履歴を `data/reading_history.parquet` で管理し、既存の `.book_timer_state.json` から自動移行できるよう改善
 - `読了リストに追加` ボタンを追加し、入力中の書名と日付から読了履歴を登録できるよう改善
-- 読了履歴の保存順序と重複排除を検証する回帰テストを追加
+- Notebook から読了履歴を確認できる `notebooks/reading_history.ipynb` を追加
+- 読了履歴の Parquet 保存、JSON 移行、保存順序を検証する回帰テストを追加
 
 ## 2026-04-04
 

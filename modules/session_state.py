@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 DEFAULT_STATE_PATH = Path(".book_timer_state.json")
 BOOKS_FIELD = "books"
 READING_HISTORY_FIELD = "reading_history"
+DATE_FORMAT = "%Y-%m-%d"
 STATE_FIELDS = (
     "book_title",
     "session_date",
@@ -37,8 +39,8 @@ def load_book_titles(state_path: Path = DEFAULT_STATE_PATH) -> list[str]:
     return _normalize_book_titles(data.get(BOOKS_FIELD))
 
 
-def load_reading_history(state_path: Path = DEFAULT_STATE_PATH) -> list[dict[str, str]]:
-    """Load the persisted reading history entries sorted by latest first."""
+def load_legacy_reading_history(state_path: Path = DEFAULT_STATE_PATH) -> list[dict[str, str]]:
+    """Load reading history from the legacy JSON state payload."""
     data = _load_state_data(state_path)
     return _normalize_reading_history(data.get(READING_HISTORY_FIELD))
 
@@ -46,7 +48,6 @@ def load_reading_history(state_path: Path = DEFAULT_STATE_PATH) -> list[dict[str
 def save_form_state(
     form_state: dict[str, str],
     book_titles: list[str] | None = None,
-    reading_history: list[dict[str, str]] | None = None,
     state_path: Path = DEFAULT_STATE_PATH,
 ) -> None:
     """Persist the current form values for the next launch."""
@@ -55,7 +56,6 @@ def save_form_state(
         for field in STATE_FIELDS
     }
     payload[BOOKS_FIELD] = _normalize_book_titles(book_titles)
-    payload[READING_HISTORY_FIELD] = _normalize_reading_history(reading_history)
 
     try:
         state_path.write_text(
@@ -119,7 +119,7 @@ def _normalize_reading_history(value: object) -> list[dict[str, str]]:
         if not isinstance(item, dict):
             continue
 
-        session_date = _normalize_value(item.get("session_date")).strip()
+        session_date = _normalize_session_date(item.get("session_date"))
         book_title = _normalize_value(item.get("book_title")).strip()
 
         if not session_date or not book_title:
@@ -145,3 +145,15 @@ def _normalize_reading_history(value: object) -> list[dict[str, str]]:
         reverse=True,
     )
     return normalized_entries
+
+
+def _normalize_session_date(value: object) -> str:
+    """Normalize supported date inputs to YYYY-MM-DD."""
+    text = _normalize_value(value).strip()
+    if not text:
+        return ""
+
+    try:
+        return datetime.strptime(text, DATE_FORMAT).strftime(DATE_FORMAT)
+    except ValueError:
+        return ""
