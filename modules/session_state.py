@@ -5,6 +5,7 @@ from pathlib import Path
 
 DEFAULT_STATE_PATH = Path(".book_timer_state.json")
 BOOKS_FIELD = "books"
+READING_HISTORY_FIELD = "reading_history"
 STATE_FIELDS = (
     "book_title",
     "session_date",
@@ -36,9 +37,16 @@ def load_book_titles(state_path: Path = DEFAULT_STATE_PATH) -> list[str]:
     return _normalize_book_titles(data.get(BOOKS_FIELD))
 
 
+def load_reading_history(state_path: Path = DEFAULT_STATE_PATH) -> list[dict[str, str]]:
+    """Load the persisted reading history entries sorted by latest first."""
+    data = _load_state_data(state_path)
+    return _normalize_reading_history(data.get(READING_HISTORY_FIELD))
+
+
 def save_form_state(
     form_state: dict[str, str],
     book_titles: list[str] | None = None,
+    reading_history: list[dict[str, str]] | None = None,
     state_path: Path = DEFAULT_STATE_PATH,
 ) -> None:
     """Persist the current form values for the next launch."""
@@ -47,6 +55,7 @@ def save_form_state(
         for field in STATE_FIELDS
     }
     payload[BOOKS_FIELD] = _normalize_book_titles(book_titles)
+    payload[READING_HISTORY_FIELD] = _normalize_reading_history(reading_history)
 
     try:
         state_path.write_text(
@@ -96,3 +105,43 @@ def _normalize_book_titles(value: object) -> list[str]:
 
     normalized_titles.sort(key=str.casefold)
     return normalized_titles
+
+
+def _normalize_reading_history(value: object) -> list[dict[str, str]]:
+    """Normalize persisted reading history into unique entries sorted by date."""
+    if not isinstance(value, list):
+        return []
+
+    normalized_entries: list[dict[str, str]] = []
+    seen_keys: set[tuple[str, str]] = set()
+
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        session_date = _normalize_value(item.get("session_date")).strip()
+        book_title = _normalize_value(item.get("book_title")).strip()
+
+        if not session_date or not book_title:
+            continue
+
+        entry_key = (session_date, book_title.casefold())
+        if entry_key in seen_keys:
+            continue
+
+        seen_keys.add(entry_key)
+        normalized_entries.append(
+            {
+                "session_date": session_date,
+                "book_title": book_title,
+            }
+        )
+
+    normalized_entries.sort(
+        key=lambda entry: (
+            entry["session_date"],
+            entry["book_title"].casefold(),
+        ),
+        reverse=True,
+    )
+    return normalized_entries

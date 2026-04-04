@@ -13,6 +13,7 @@ from modules.session_state import (
     SessionStateError,
     load_book_titles,
     load_form_state,
+    load_reading_history,
     save_form_state,
 )
 
@@ -30,10 +31,14 @@ START_PAGE_LABEL = "開始ページ"
 END_PAGE_LABEL = "終了ページ"
 APPLY_LABEL = "反映"
 REGISTER_CALENDAR_LABEL = "Googleカレンダーに登録"
+ADD_READING_HISTORY_LABEL = "読了リストに追加"
 DELETE_BOOK_LABEL = "削除"
 EMPTY_BOOK_TEXT = "書名 --"
 EMPTY_TIME_TEXT = "日付 ----/--/-- / 開始 --:-- / 終了 --:--"
 EMPTY_PAGE_TEXT = "ページ -- -> --"
+READING_HISTORY_TITLE = "読了リスト"
+LATEST_READING_EMPTY_TEXT = "最新の読了: まだ記録がありません。"
+READING_HISTORY_EMPTY_TEXT = "まだ読了履歴がありません。"
 READY_TEXT = "読書セッションを入力して「反映」を押してください。"
 CALENDAR_PROGRESS_TEXT = "Googleカレンダーへ登録中です..."
 CALENDAR_SUCCESS_TEXT = "Googleカレンダーに登録しました。"
@@ -41,6 +46,7 @@ CALENDAR_UNEXPECTED_ERROR_TEXT = (
     "Googleカレンダーへの登録中に予期しないエラーが発生しました。"
 )
 BOOK_DELETED_TEXT = "書名一覧から削除しました。"
+READING_HISTORY_SUCCESS_TEXT = "読了リストに追加しました。"
 DEFAULT_START_TIME = "08:00"
 DEFAULT_END_TIME = "24:00"
 CALENDAR_RESULT_POLL_MS = 100
@@ -81,12 +87,33 @@ def parse_page(page_text: str, label: str) -> int:
         raise ValueError(f"{label}は整数で入力してください。") from exc
 
 
-def parse_book_title(book_text: str) -> str:
-    """Require a non-empty book title for Google Calendar registration."""
+def parse_book_title(
+    book_text: str,
+    *,
+    missing_message: str = "書名を入力してください。",
+) -> str:
+    """Require a non-empty book title and return the normalized value."""
     title = book_text.strip()
     if not title:
-        raise ValueError("Googleカレンダーに登録するには書名を入力してください。")
+        raise ValueError(missing_message)
     return title
+
+
+def build_latest_reading_text(reading_history: list[dict[str, str]]) -> str:
+    """Build the latest reading summary label from the saved history."""
+    if not reading_history:
+        return LATEST_READING_EMPTY_TEXT
+
+    latest_entry = reading_history[0]
+    return (
+        f"最新の読了: {latest_entry['session_date']} / "
+        f"{latest_entry['book_title']}"
+    )
+
+
+def format_reading_history_entry(entry: dict[str, str]) -> str:
+    """Render one reading-history row for the on-screen list."""
+    return f"{entry['session_date']}  {entry['book_title']}"
 
 
 def validate_session_inputs(
@@ -173,6 +200,7 @@ def run_app() -> None:
     """Create and run the Tkinter application."""
     saved_form_state = load_form_state()
     saved_book_titles = load_book_titles()
+    saved_reading_history = load_reading_history()
 
     root = tk.Tk()
     root.title(APP_TITLE)
@@ -185,6 +213,7 @@ def run_app() -> None:
     combobox_style = ttk.Style(root)
     combobox_style.configure("BookTimer.TCombobox", font=("Helvetica", 12))
     book_titles = list(saved_book_titles)
+    reading_history = list(saved_reading_history)
 
     saved_book_title = saved_form_state.get("book_title", "").strip()
     if saved_book_title and saved_book_title not in book_titles:
@@ -209,6 +238,7 @@ def run_app() -> None:
     book_label_var = tk.StringVar(value=EMPTY_BOOK_TEXT)
     time_label_var = tk.StringVar(value=EMPTY_TIME_TEXT)
     page_label_var = tk.StringVar(value=EMPTY_PAGE_TEXT)
+    latest_reading_var = tk.StringVar(value=build_latest_reading_text(reading_history))
     current_session: tuple[str, str, str, int, int] | None = None
     scheduled_update_id: str | None = None
     calendar_result_queue: queue.Queue[tuple[str, str]] = queue.Queue()
@@ -294,6 +324,13 @@ def run_app() -> None:
         side="left",
         padx=(0, 8),
     )
+    add_reading_history_button = tk.Button(
+        button_frame,
+        text=ADD_READING_HISTORY_LABEL,
+        font=info_font,
+        command=lambda: add_reading_history_entry(),
+    )
+    add_reading_history_button.pack(side="left", padx=(0, 8))
     register_calendar_button = tk.Button(
         button_frame,
         text=REGISTER_CALENDAR_LABEL,
@@ -352,6 +389,28 @@ def run_app() -> None:
     )
     calendar_status_label.pack(padx=16, pady=(0, 12))
 
+    reading_history_frame = tk.LabelFrame(root, text=READING_HISTORY_TITLE, padx=12, pady=12)
+    reading_history_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+    reading_history_frame.columnconfigure(0, weight=1)
+    reading_history_frame.rowconfigure(1, weight=1)
+
+    latest_reading_label = tk.Label(
+        reading_history_frame,
+        textvariable=latest_reading_var,
+        font=info_font,
+        anchor="w",
+        justify="left",
+    )
+    latest_reading_label.grid(row=0, column=0, sticky="ew")
+
+    reading_history_listbox = tk.Listbox(
+        reading_history_frame,
+        font=info_font,
+        height=6,
+        activestyle="none",
+    )
+    reading_history_listbox.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+
     def schedule_progress_update(delay_ms: int) -> None:
         nonlocal scheduled_update_id
         if scheduled_update_id is not None:
@@ -371,6 +430,7 @@ def run_app() -> None:
         calendar_registration_in_progress = is_running
         register_calendar_button.config(state="disabled" if is_running else "normal")
         apply_button.config(state="disabled" if is_running else "normal")
+        add_reading_history_button.config(state="disabled" if is_running else "normal")
 
     def get_form_state() -> dict[str, str]:
         return {
@@ -395,7 +455,64 @@ def run_app() -> None:
         update_book_title_choices()
 
     def persist_form_state() -> None:
-        save_form_state(get_form_state(), book_titles)
+        save_form_state(get_form_state(), book_titles, reading_history)
+
+    def refresh_reading_history_display() -> None:
+        latest_reading_var.set(build_latest_reading_text(reading_history))
+        reading_history_listbox.delete(0, tk.END)
+
+        if not reading_history:
+            reading_history_listbox.insert(tk.END, READING_HISTORY_EMPTY_TEXT)
+            return
+
+        for entry in reading_history:
+            reading_history_listbox.insert(tk.END, format_reading_history_entry(entry))
+
+    def add_reading_history_entry() -> None:
+        try:
+            book_title = parse_book_title(book_title_var.get())
+            session_date = date_var.get().strip()
+            parse_session_date(session_date)
+        except ValueError as exc:
+            error_var.set(str(exc))
+            calendar_status_var.set("")
+            return
+
+        remember_book_title(book_title)
+        entry = {
+            "session_date": session_date,
+            "book_title": book_title,
+        }
+
+        duplicate_index = next(
+            (
+                index
+                for index, saved_entry in enumerate(reading_history)
+                if saved_entry["session_date"] == session_date
+                and saved_entry["book_title"].casefold() == book_title.casefold()
+            ),
+            None,
+        )
+        if duplicate_index is not None:
+            reading_history.pop(duplicate_index)
+
+        reading_history.append(entry)
+        reading_history.sort(
+            key=lambda saved_entry: (
+                saved_entry["session_date"],
+                saved_entry["book_title"].casefold(),
+            ),
+            reverse=True,
+        )
+        refresh_reading_history_display()
+        calendar_status_var.set(READING_HISTORY_SUCCESS_TEXT)
+        error_var.set("")
+
+        try:
+            persist_form_state()
+        except SessionStateError as exc:
+            error_var.set(str(exc))
+            calendar_status_var.set("")
 
     def start_calendar_registration_worker(
         book_title: str,
@@ -532,7 +649,10 @@ def run_app() -> None:
 
         try:
             book_title, session_values = read_form_values()
-            calendar_book_title = parse_book_title(book_title)
+            calendar_book_title = parse_book_title(
+                book_title,
+                missing_message="Googleカレンダーに登録するには書名を入力してください。",
+            )
             remember_book_title(book_title)
             set_session_state(book_title, session_values)
             session_date, start_time, end_time, start_page, end_page = session_values
@@ -606,6 +726,7 @@ def run_app() -> None:
         progress_label.config(wraplength=max(int(width * 0.85), 220))
         error_label.config(wraplength=max(int(width * 0.85), 220))
         calendar_status_label.config(wraplength=max(int(width * 0.85), 220))
+        latest_reading_label.config(wraplength=max(int(width * 0.8), 220))
 
     def restore_saved_session() -> None:
         if not any(saved_form_state.values()):
@@ -639,6 +760,7 @@ def run_app() -> None:
     root.bind("<Configure>", adjust_layout)
     root.bind("<Return>", apply_session)
     root.after(0, adjust_layout)
+    root.after(0, refresh_reading_history_display)
     root.after(0, restore_saved_session)
     root.protocol("WM_DELETE_WINDOW", handle_close)
     book_title_combobox.focus_set()
