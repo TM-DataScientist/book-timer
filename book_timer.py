@@ -1,3 +1,5 @@
+import queue
+import threading
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
@@ -35,9 +37,13 @@ EMPTY_PAGE_TEXT = "ページ -- -> --"
 READY_TEXT = "読書セッションを入力して「反映」を押してください。"
 CALENDAR_PROGRESS_TEXT = "Googleカレンダーへ登録中です..."
 CALENDAR_SUCCESS_TEXT = "Googleカレンダーに登録しました。"
+CALENDAR_UNEXPECTED_ERROR_TEXT = (
+    "Googleカレンダーへの登録中に予期しないエラーが発生しました。"
+)
 BOOK_DELETED_TEXT = "書名一覧から削除しました。"
 DEFAULT_START_TIME = "08:00"
 DEFAULT_END_TIME = "24:00"
+CALENDAR_RESULT_POLL_MS = 100
 
 
 def parse_time_on_date(time_text: str, reference: datetime) -> datetime:
@@ -205,6 +211,9 @@ def run_app() -> None:
     page_label_var = tk.StringVar(value=EMPTY_PAGE_TEXT)
     current_session: tuple[str, str, str, int, int] | None = None
     scheduled_update_id: str | None = None
+    calendar_result_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+    calendar_poll_id: str | None = None
+    calendar_registration_in_progress = False
 
     form_frame = tk.LabelFrame(root, text=SETUP_TITLE, padx=12, pady=12)
     form_frame.pack(fill="x", padx=16, pady=(16, 8))
@@ -275,16 +284,23 @@ def run_app() -> None:
     button_frame = tk.Frame(root)
     button_frame.pack(pady=(0, 8))
 
-    tk.Button(button_frame, text=APPLY_LABEL, font=info_font, command=lambda: apply_session()).pack(
+    apply_button = tk.Button(
+        button_frame,
+        text=APPLY_LABEL,
+        font=info_font,
+        command=lambda: apply_session(),
+    )
+    apply_button.pack(
         side="left",
         padx=(0, 8),
     )
-    tk.Button(
+    register_calendar_button = tk.Button(
         button_frame,
         text=REGISTER_CALENDAR_LABEL,
         font=info_font,
         command=lambda: register_calendar_event(),
-    ).pack(side="left")
+    )
+    register_calendar_button.pack(side="left")
 
     info_frame = tk.Frame(root)
     info_frame.pack(pady=(8, 8))
@@ -343,6 +359,19 @@ def run_app() -> None:
             scheduled_update_id = None
         scheduled_update_id = root.after(delay_ms, update_progress)
 
+    def schedule_calendar_result_poll(delay_ms: int) -> None:
+        nonlocal calendar_poll_id
+        if calendar_poll_id is not None:
+            root.after_cancel(calendar_poll_id)
+            calendar_poll_id = None
+        calendar_poll_id = root.after(delay_ms, process_calendar_result)
+
+    def set_calendar_registration_state(is_running: bool) -> None:
+        nonlocal calendar_registration_in_progress
+        calendar_registration_in_progress = is_running
+        register_calendar_button.config(state="disabled" if is_running else "normal")
+        apply_button.config(state="disabled" if is_running else "normal")
+
     def get_form_state() -> dict[str, str]:
         return {
             "book_title": book_title_var.get().strip(),
@@ -367,6 +396,34 @@ def run_app() -> None:
 
     def persist_form_state() -> None:
         save_form_state(get_form_state(), book_titles)
+
+    def start_calendar_registration_worker(
+        book_title: str,
+        session_date: str,
+        start_dt: datetime,
+        end_dt: datetime,
+        start_page: int,
+        end_page: int,
+    ) -> None:
+        def worker() -> None:
+            try:
+                create_reading_event(
+                    book_title=book_title,
+                    session_date=session_date,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    start_page=start_page,
+                    end_page=end_page,
+                )
+            except GoogleCalendarIntegrationError as exc:
+                calendar_result_queue.put(("error", str(exc)))
+            except Exception:
+                calendar_result_queue.put(("error", CALENDAR_UNEXPECTED_ERROR_TEXT))
+            else:
+                calendar_result_queue.put(("success", ""))
+
+        threading.Thread(target=worker, daemon=True).start()
+        schedule_calendar_result_poll(CALENDAR_RESULT_POLL_MS)
 
     def set_session_state(
         book_title: str,
@@ -411,6 +468,32 @@ def run_app() -> None:
             error_var.set(str(exc))
             return
 
+    def process_calendar_result() -> None:
+        nonlocal calendar_poll_id
+        calendar_poll_id = None
+
+        try:
+            result_kind, payload = calendar_result_queue.get_nowait()
+        except queue.Empty:
+            if calendar_registration_in_progress:
+                schedule_calendar_result_poll(CALENDAR_RESULT_POLL_MS)
+            return
+
+        set_calendar_registration_state(False)
+
+        if result_kind == "error":
+            error_var.set(payload)
+            calendar_status_var.set("")
+            return
+
+        calendar_status_var.set(CALENDAR_SUCCESS_TEXT)
+
+        try:
+            persist_form_state()
+        except SessionStateError as exc:
+            error_var.set(str(exc))
+            calendar_status_var.set("")
+
     def delete_selected_book() -> None:
         selected_title = book_title_var.get().strip()
         if not selected_title:
@@ -440,6 +523,9 @@ def run_app() -> None:
             return
 
     def register_calendar_event() -> None:
+        if calendar_registration_in_progress:
+            return
+
         calendar_status_var.set(CALENDAR_PROGRESS_TEXT)
         error_var.set("")
         root.update_idletasks()
@@ -457,7 +543,8 @@ def run_app() -> None:
                 start_page,
                 end_page,
             )
-            create_reading_event(
+            set_calendar_registration_state(True)
+            start_calendar_registration_worker(
                 book_title=calendar_book_title,
                 session_date=session_date,
                 start_dt=start_dt,
@@ -466,15 +553,6 @@ def run_app() -> None:
                 end_page=end_page,
             )
         except (GoogleCalendarIntegrationError, ValueError) as exc:
-            error_var.set(str(exc))
-            calendar_status_var.set("")
-            return
-
-        calendar_status_var.set(CALENDAR_SUCCESS_TEXT)
-
-        try:
-            persist_form_state()
-        except SessionStateError as exc:
             error_var.set(str(exc))
             calendar_status_var.set("")
             return
@@ -544,12 +622,17 @@ def run_app() -> None:
         calendar_status_var.set("")
 
     def handle_close() -> None:
+        nonlocal calendar_poll_id
         try:
             persist_form_state()
         except SessionStateError as exc:
             error_var.set(str(exc))
             calendar_status_var.set("")
             return
+
+        if calendar_poll_id is not None:
+            root.after_cancel(calendar_poll_id)
+            calendar_poll_id = None
 
         root.destroy()
 

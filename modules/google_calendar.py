@@ -69,21 +69,17 @@ def create_reading_event(
         raise GoogleCalendarIntegrationError(
             "Googleカレンダーへの登録に失敗しました。認証設定とネットワークを確認してください。"
         ) from exc
+    except Exception as exc:
+        raise GoogleCalendarIntegrationError(
+            "Googleカレンダーへの登録中にエラーが発生しました。認証設定とネットワークを確認してください。"
+        ) from exc
 
     return str(event.get("htmlLink", ""))
 
 
 def _load_credentials(credentials_path: Path, token_path: Path):
     credentials_cls, request_cls, installed_app_flow_cls = _import_google_auth_client()
-    credentials = None
-
-    if token_path.exists():
-        try:
-            credentials = credentials_cls.from_authorized_user_file(str(token_path), SCOPES)
-        except Exception as exc:
-            raise GoogleCalendarIntegrationError(
-                "`token.json` の読み込みに失敗しました。削除して再認証してください。"
-            ) from exc
+    credentials = _load_cached_credentials(token_path, credentials_cls)
 
     if credentials and credentials.valid:
         return credentials
@@ -91,30 +87,15 @@ def _load_credentials(credentials_path: Path, token_path: Path):
     if credentials and credentials.expired and credentials.refresh_token:
         try:
             credentials.refresh(request_cls())
-        except Exception as exc:
-            raise GoogleCalendarIntegrationError(
-                "Google認証の更新に失敗しました。`token.json` を削除して再認証してください。"
-            ) from exc
-    else:
-        resolved_credentials_path = _resolve_credentials_path(credentials_path)
+        except Exception:
+            credentials = None
+            _discard_cached_token(token_path)
 
-        if resolved_credentials_path is None:
-            raise GoogleCalendarIntegrationError(
-                "OAuth クライアント JSON が見つかりません。Google Cloud で Desktop app "
-                "の OAuth クライアントを作成し、`credentials.json` または "
-                "`client_secret_...json` をこのフォルダに配置してください。"
-            )
-
-        try:
-            flow = installed_app_flow_cls.from_client_secrets_file(
-                str(resolved_credentials_path),
-                SCOPES,
-            )
-            credentials = flow.run_local_server(port=0)
-        except Exception as exc:
-            raise GoogleCalendarIntegrationError(
-                "Google認証に失敗しました。ブラウザでのログインと OAuth 設定を確認してください。"
-            ) from exc
+    if not credentials or not credentials.valid:
+        credentials = _authorize_with_browser(
+            credentials_path,
+            installed_app_flow_cls,
+        )
 
     try:
         token_path.write_text(credentials.to_json(), encoding="utf-8")
@@ -124,6 +105,49 @@ def _load_credentials(credentials_path: Path, token_path: Path):
         ) from exc
 
     return credentials
+
+
+def _load_cached_credentials(token_path: Path, credentials_cls):
+    """Load cached user credentials when available, ignoring unusable tokens."""
+    if not token_path.exists():
+        return None
+
+    try:
+        return credentials_cls.from_authorized_user_file(str(token_path), SCOPES)
+    except Exception:
+        _discard_cached_token(token_path)
+        return None
+
+
+def _authorize_with_browser(credentials_path: Path, installed_app_flow_cls):
+    """Start the OAuth browser flow and return fresh user credentials."""
+    resolved_credentials_path = _resolve_credentials_path(credentials_path)
+
+    if resolved_credentials_path is None:
+        raise GoogleCalendarIntegrationError(
+            "OAuth クライアント JSON が見つかりません。Google Cloud で Desktop app "
+            "の OAuth クライアントを作成し、`credentials.json` または "
+            "`client_secret_...json` をこのフォルダに配置してください。"
+        )
+
+    try:
+        flow = installed_app_flow_cls.from_client_secrets_file(
+            str(resolved_credentials_path),
+            SCOPES,
+        )
+        return flow.run_local_server(port=0)
+    except Exception as exc:
+        raise GoogleCalendarIntegrationError(
+            "Google認証に失敗しました。ブラウザでのログインと OAuth 設定を確認してください。"
+        ) from exc
+
+
+def _discard_cached_token(token_path: Path) -> None:
+    """Best-effort cleanup of an unusable cached token before reauth."""
+    try:
+        token_path.unlink(missing_ok=True)
+    except OSError:
+        return
 
 
 def _import_google_auth_client():
