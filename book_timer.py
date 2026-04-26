@@ -25,7 +25,6 @@ from modules.session_state import (
 DEFAULT_WIDTH = 560
 DEFAULT_HEIGHT = 500
 DATE_FORMAT = "%Y-%m-%d"
-TIME_FORMAT = "%H:%M"
 APP_TITLE = "読書タイマー"
 SETUP_TITLE = "セッション設定"
 BOOK_TITLE_LABEL = "書名"
@@ -58,20 +57,21 @@ CALENDAR_RESULT_POLL_MS = 100
 
 
 def parse_time_on_date(time_text: str, reference: datetime) -> datetime:
-    """Parse HH:MM text on the reference date, allowing 24:00 as next-day midnight."""
+    """Parse HH:MM text on the reference date, allowing hours beyond 24."""
     normalized = time_text.strip()
 
-    if normalized == "24:00":
-        midnight = reference.replace(hour=0, minute=0, second=0, microsecond=0)
-        return midnight + timedelta(days=1)
+    try:
+        hour_text, minute_text = normalized.split(":", maxsplit=1)
+        hours = int(hour_text)
+        minutes = int(minute_text)
+    except ValueError as exc:
+        raise ValueError("Invalid time format") from exc
 
-    parsed = datetime.strptime(normalized, TIME_FORMAT)
-    return reference.replace(
-        hour=parsed.hour,
-        minute=parsed.minute,
-        second=0,
-        microsecond=0,
-    )
+    if hours < 0 or minutes < 0 or minutes > 59:
+        raise ValueError("Invalid time format")
+
+    midnight = reference.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight + timedelta(hours=hours, minutes=minutes)
 
 
 def parse_session_date(date_text: str) -> datetime:
@@ -141,7 +141,7 @@ def validate_session_inputs(
         end_dt = parse_time_on_date(end_time, session_reference)
     except ValueError as exc:
         raise ValueError(
-            "時刻は HH:MM 形式で入力してください。24:00 は深夜 0 時として扱います。"
+            "時刻は HH:MM 形式で入力してください。24:00 以降は翌日の時刻として扱います。"
         ) from exc
 
     if end_dt <= start_dt:
