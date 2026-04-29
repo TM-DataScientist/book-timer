@@ -2,6 +2,7 @@ import queue
 import threading
 import tkinter as tk
 from tkinter import font as tkfont
+from tkinter import messagebox
 from tkinter import ttk
 from datetime import datetime, timedelta
 
@@ -14,6 +15,7 @@ from modules.reading_history_store import (
     load_reading_history,
     normalize_reading_history,
     save_reading_history,
+    summarize_reading_history,
 )
 from modules.session_state import (
     SessionStateError,
@@ -23,7 +25,7 @@ from modules.session_state import (
 )
 
 DEFAULT_WIDTH = 560
-DEFAULT_HEIGHT = 500
+DEFAULT_HEIGHT = 620
 DATE_FORMAT = "%Y-%m-%d"
 APP_TITLE = "読書タイマー"
 SETUP_TITLE = "セッション設定"
@@ -51,6 +53,11 @@ CALENDAR_UNEXPECTED_ERROR_TEXT = (
 )
 BOOK_DELETED_TEXT = "書名一覧から削除しました。"
 READING_HISTORY_SUCCESS_TEXT = "読了リストに追加しました。"
+READING_STATS_TITLE = "読了冊数"
+READING_STATS_EMPTY_TEXT = "読了冊数: 0 冊"
+DUPLICATE_READING_ENTRY_TEXT = "同じ日付の同じ本はすでに読了リストにあります。"
+DUPLICATE_BOOK_CONFIRM_TITLE = "同じ本の登録"
+DUPLICATE_BOOK_CONFIRM_MESSAGE = "この本はすでに読了リストにあります。再読として追加しますか？"
 DEFAULT_START_TIME = "08:00"
 DEFAULT_END_TIME = "24:00"
 CALENDAR_RESULT_POLL_MS = 100
@@ -119,6 +126,56 @@ def build_latest_reading_text(reading_history: list[dict[str, str]]) -> str:
 def format_reading_history_entry(entry: dict[str, str]) -> str:
     """Render one reading-history row for the on-screen list."""
     return f"{entry['session_date']}  {entry['book_title']}"
+
+
+def build_reading_stats_lines(reading_history: list[dict[str, str]]) -> list[str]:
+    """Build compact count lines for the reading-history stats list."""
+    summary = summarize_reading_history(reading_history)
+    total = int(summary["total"])
+    if total == 0:
+        return [READING_STATS_EMPTY_TEXT]
+
+    yearly_counts = list(summary["yearly"])
+    monthly_counts = list(summary["monthly"])
+    max_count = max(
+        [count for _, count in yearly_counts + monthly_counts],
+        default=total,
+    )
+
+    def format_count(label: str, count: int) -> str:
+        bar_length = max(1, round((count / max_count) * 10))
+        return f"{label} {'#' * bar_length} {count} 冊"
+
+    lines = [f"累計 {'#' * 10} {total} 冊"]
+    lines.extend(format_count(year, count) for year, count in yearly_counts[:3])
+    lines.extend(format_count(month, count) for month, count in monthly_counts[:6])
+    return lines
+
+
+def has_same_reading_entry(
+    reading_history: list[dict[str, str]],
+    session_date: str,
+    book_title: str,
+) -> bool:
+    """Return whether the same normalized title is registered on the same date."""
+    normalized_title = book_title.casefold()
+    return any(
+        entry["session_date"] == session_date
+        and entry["book_title"].casefold() == normalized_title
+        for entry in reading_history
+    )
+
+
+def has_same_book_title(
+    reading_history: list[dict[str, str]],
+    book_title: str,
+) -> bool:
+    """Return whether the same normalized title exists anywhere in history."""
+    normalized_title = book_title.casefold()
+    return any(
+        entry["book_title"].casefold() == normalized_title
+        for entry in reading_history
+    )
 
 
 def normalize_session_date(date_text: str) -> str:
@@ -408,7 +465,7 @@ def run_app() -> None:
     reading_history_frame = tk.LabelFrame(root, text=READING_HISTORY_TITLE, padx=12, pady=12)
     reading_history_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
     reading_history_frame.columnconfigure(0, weight=1)
-    reading_history_frame.rowconfigure(1, weight=1)
+    reading_history_frame.rowconfigure(2, weight=1)
 
     latest_reading_label = tk.Label(
         reading_history_frame,
@@ -419,13 +476,30 @@ def run_app() -> None:
     )
     latest_reading_label.grid(row=0, column=0, sticky="ew")
 
+    reading_stats_frame = tk.LabelFrame(
+        reading_history_frame,
+        text=READING_STATS_TITLE,
+        padx=8,
+        pady=8,
+    )
+    reading_stats_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+    reading_stats_frame.columnconfigure(0, weight=1)
+
+    reading_stats_listbox = tk.Listbox(
+        reading_stats_frame,
+        font=info_font,
+        height=4,
+        activestyle="none",
+    )
+    reading_stats_listbox.grid(row=0, column=0, sticky="ew")
+
     reading_history_listbox = tk.Listbox(
         reading_history_frame,
         font=info_font,
         height=6,
         activestyle="none",
     )
-    reading_history_listbox.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+    reading_history_listbox.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
 
     def schedule_progress_update(delay_ms: int) -> None:
         nonlocal scheduled_update_id
@@ -478,6 +552,10 @@ def run_app() -> None:
 
     def refresh_reading_history_display() -> None:
         latest_reading_var.set(build_latest_reading_text(reading_history))
+        reading_stats_listbox.delete(0, tk.END)
+        for stats_line in build_reading_stats_lines(reading_history):
+            reading_stats_listbox.insert(tk.END, stats_line)
+
         reading_history_listbox.delete(0, tk.END)
 
         if not reading_history:
@@ -494,6 +572,20 @@ def run_app() -> None:
         except ValueError as exc:
             error_var.set(str(exc))
             calendar_status_var.set("")
+            return
+
+        if has_same_reading_entry(reading_history, session_date, book_title):
+            error_var.set(DUPLICATE_READING_ENTRY_TEXT)
+            calendar_status_var.set("")
+            return
+
+        if has_same_book_title(reading_history, book_title) and not messagebox.askyesno(
+            DUPLICATE_BOOK_CONFIRM_TITLE,
+            DUPLICATE_BOOK_CONFIRM_MESSAGE,
+            parent=root,
+        ):
+            calendar_status_var.set("")
+            error_var.set("")
             return
 
         remember_book_title(book_title)

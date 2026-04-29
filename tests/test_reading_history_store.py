@@ -6,6 +6,7 @@ from modules.reading_history_store import (
     ReadingHistoryStoreError,
     load_reading_history,
     save_reading_history,
+    summarize_reading_history,
 )
 
 
@@ -61,3 +62,21 @@ def test_load_reading_history_raises_for_invalid_parquet(tmp_path):
 
     with pytest.raises(ReadingHistoryStoreError):
         load_reading_history(history_path, tmp_path / "state.json")
+
+
+def test_summarize_reading_history_counts_total_years_and_months():
+    summary = summarize_reading_history(
+        [
+            {"session_date": "2026-04-20", "book_title": "Alpha"},
+            {"session_date": "2026-04-21", "book_title": "Alpha"},
+            {"session_date": "2026-03-01", "book_title": "Beta"},
+            {"session_date": "2025-12-31", "book_title": "Gamma"},
+            {"session_date": "not-a-date", "book_title": "Ignored"},
+        ]
+    )
+
+    assert summary == {
+        "total": 4,
+        "yearly": [("2026", 3), ("2025", 1)],
+        "monthly": [("2026-04", 2), ("2026-03", 1), ("2025-12", 1)],
+    }

@@ -86,6 +86,26 @@ def normalize_reading_history(value: object) -> list[dict[str, str]]:
     return normalized_entries
 
 
+def summarize_reading_history(value: object) -> dict[str, object]:
+    """Build total, yearly, and monthly reading counts from normalized history."""
+    normalized_entries = normalize_reading_history(value)
+    yearly_counts: dict[str, int] = {}
+    monthly_counts: dict[str, int] = {}
+
+    for entry in normalized_entries:
+        session_date = entry["session_date"]
+        year_key = session_date[:4]
+        month_key = session_date[:7]
+        yearly_counts[year_key] = yearly_counts.get(year_key, 0) + 1
+        monthly_counts[month_key] = monthly_counts.get(month_key, 0) + 1
+
+    return {
+        "total": len(normalized_entries),
+        "yearly": sorted(yearly_counts.items(), reverse=True),
+        "monthly": sorted(monthly_counts.items(), reverse=True),
+    }
+
+
 def _load_history_from_parquet(history_path: Path) -> list[dict[str, str]]:
     """Read reading history from the Parquet file."""
     pd = _import_pandas()
