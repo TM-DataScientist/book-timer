@@ -1,6 +1,7 @@
 import queue
 import threading
 import tkinter as tk
+from calendar import monthrange
 from tkinter import font as tkfont
 from tkinter import messagebox
 from tkinter import ttk
@@ -56,6 +57,7 @@ READING_HISTORY_SUCCESS_TEXT = "読了リストに追加しました。"
 READING_STATS_TITLE = "読了冊数"
 READING_STATS_EMPTY_TEXT = "読了冊数: 0 冊"
 DUPLICATE_READING_ENTRY_TEXT = "同じ日付の同じ本はすでに読了リストにあります。"
+DUPLICATE_RECENT_BOOK_TEXT = "同じ本は前回の読了日から1ヶ月以上空けて登録してください。"
 DUPLICATE_BOOK_CONFIRM_TITLE = "同じ本の登録"
 DUPLICATE_BOOK_CONFIRM_MESSAGE = "この本はすでに読了リストにあります。再読として追加しますか？"
 DEFAULT_START_TIME = "08:00"
@@ -162,6 +164,37 @@ def has_same_reading_entry(
     return any(
         entry["session_date"] == session_date
         and entry["book_title"].casefold() == normalized_title
+        for entry in reading_history
+    )
+
+
+def add_months(value: datetime, month_count: int) -> datetime:
+    """Return a date shifted by whole calendar months."""
+    month_index = value.month - 1 + month_count
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def is_less_than_one_month_apart(first_date: str, second_date: str) -> bool:
+    """Return whether two YYYY-MM-DD dates are separated by less than one month."""
+    first_dt = parse_session_date(first_date)
+    second_dt = parse_session_date(second_date)
+    earlier_dt, later_dt = sorted((first_dt, second_dt))
+    return add_months(earlier_dt, 1) > later_dt
+
+
+def has_recent_same_book_title(
+    reading_history: list[dict[str, str]],
+    session_date: str,
+    book_title: str,
+) -> bool:
+    """Return whether the same title was read less than one month apart."""
+    normalized_title = book_title.casefold()
+    return any(
+        entry["book_title"].casefold() == normalized_title
+        and is_less_than_one_month_apart(entry["session_date"], session_date)
         for entry in reading_history
     )
 
@@ -574,8 +607,8 @@ def run_app() -> None:
             calendar_status_var.set("")
             return
 
-        if has_same_reading_entry(reading_history, session_date, book_title):
-            error_var.set(DUPLICATE_READING_ENTRY_TEXT)
+        if has_recent_same_book_title(reading_history, session_date, book_title):
+            error_var.set(DUPLICATE_RECENT_BOOK_TEXT)
             calendar_status_var.set("")
             return
 
