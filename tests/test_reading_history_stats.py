@@ -37,6 +37,7 @@ def test_duplicate_helpers_match_case_insensitive_titles():
 
 def test_one_month_threshold_uses_calendar_months():
     assert is_less_than_one_month_apart("2026-04-20", "2026-05-19")
+    assert is_less_than_one_month_apart("2026-05-19", "2026-04-20")
     assert not is_less_than_one_month_apart("2026-04-20", "2026-05-20")
     assert not is_less_than_one_month_apart("2026-01-31", "2026-02-28")
 
@@ -45,5 +46,6 @@ def test_recent_same_book_title_blocks_only_under_one_month():
     history = [{"session_date": "2026-04-20", "book_title": "Clean Code"}]
 
     assert has_recent_same_book_title(history, "2026-05-19", "clean code")
+    assert has_recent_same_book_title(history, "2026-03-22", "clean code")
     assert not has_recent_same_book_title(history, "2026-05-20", "clean code")
     assert not has_recent_same_book_title(history, "2026-05-19", "Other Book")
