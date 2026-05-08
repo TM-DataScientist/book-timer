@@ -416,17 +416,17 @@ def run_app() -> None:
         row=1, column=1, padx=(0, 12), pady=4, sticky="ew"
     )
 
-    tk.Label(form_frame, text=END_DATE_LABEL, font=info_font).grid(
+    tk.Label(form_frame, text=START_TIME_LABEL, font=info_font).grid(
         row=1, column=2, padx=(0, 8), pady=4, sticky="w"
     )
-    tk.Entry(form_frame, textvariable=end_date_var, font=info_font).grid(
+    tk.Entry(form_frame, textvariable=start_time_var, font=info_font).grid(
         row=1, column=3, pady=4, sticky="ew"
     )
 
-    tk.Label(form_frame, text=START_TIME_LABEL, font=info_font).grid(
+    tk.Label(form_frame, text=END_DATE_LABEL, font=info_font).grid(
         row=2, column=0, padx=(0, 8), pady=4, sticky="w"
     )
-    tk.Entry(form_frame, textvariable=start_time_var, font=info_font).grid(
+    tk.Entry(form_frame, textvariable=end_date_var, font=info_font).grid(
         row=2, column=1, padx=(0, 12), pady=4, sticky="ew"
     )
 
