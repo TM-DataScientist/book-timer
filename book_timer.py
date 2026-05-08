@@ -217,6 +217,26 @@ def normalize_session_date(date_text: str) -> str:
     return parse_session_date(date_text).strftime(DATE_FORMAT)
 
 
+def sync_end_date_for_start_change(
+    previous_start_date: str,
+    current_start_date: str,
+    current_end_date: str,
+) -> str:
+    """Return the end date adjusted by the same date delta as the start date."""
+    normalized_current_start = normalize_session_date(current_start_date)
+    normalized_current_end = current_end_date.strip()
+
+    try:
+        previous_start_dt = parse_session_date(previous_start_date)
+        current_start_dt = parse_session_date(normalized_current_start)
+        current_end_dt = parse_session_date(normalized_current_end)
+    except ValueError:
+        return normalized_current_start
+
+    shifted_end_dt = current_end_dt + (current_start_dt - previous_start_dt)
+    return shifted_end_dt.strftime(DATE_FORMAT)
+
+
 def validate_session_inputs(
     start_date: str,
     start_time: str,
@@ -412,9 +432,8 @@ def run_app() -> None:
     tk.Label(form_frame, text=START_DATE_LABEL, font=info_font).grid(
         row=1, column=0, padx=(0, 8), pady=4, sticky="w"
     )
-    tk.Entry(form_frame, textvariable=start_date_var, font=info_font).grid(
-        row=1, column=1, padx=(0, 12), pady=4, sticky="ew"
-    )
+    start_date_entry = tk.Entry(form_frame, textvariable=start_date_var, font=info_font)
+    start_date_entry.grid(row=1, column=1, padx=(0, 12), pady=4, sticky="ew")
 
     tk.Label(form_frame, text=START_TIME_LABEL, font=info_font).grid(
         row=1, column=2, padx=(0, 8), pady=4, sticky="w"
@@ -628,10 +647,17 @@ def run_app() -> None:
         current_start_date = start_date_var.get().strip()
         current_end_date = end_date_var.get().strip()
 
-        if not current_end_date or current_end_date == previous_start_date:
-            end_date_var.set(current_start_date)
+        try:
+            synced_end_date = sync_end_date_for_start_change(
+                previous_start_date,
+                current_start_date,
+                current_end_date,
+            )
+        except ValueError:
+            return
 
-        previous_start_date = current_start_date
+        end_date_var.set(synced_end_date)
+        previous_start_date = normalize_session_date(current_start_date)
 
     def refresh_reading_history_display() -> None:
         latest_reading_var.set(build_latest_reading_text(reading_history))
@@ -949,7 +975,7 @@ def run_app() -> None:
 
     root.bind("<Configure>", adjust_layout)
     root.bind("<Return>", apply_session)
-    start_date_var.trace_add("write", sync_end_date_default)
+    start_date_entry.bind("<FocusOut>", sync_end_date_default)
     root.after(0, adjust_layout)
     root.after(0, refresh_reading_history_display)
     root.after(0, restore_saved_session)

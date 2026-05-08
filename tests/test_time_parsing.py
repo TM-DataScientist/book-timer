@@ -2,7 +2,11 @@ from datetime import datetime
 
 import pytest
 
-from book_timer import parse_time_on_date, validate_session_inputs
+from book_timer import (
+    parse_time_on_date,
+    sync_end_date_for_start_change,
+    validate_session_inputs,
+)
 
 
 def test_parse_time_on_date_accepts_hour_beyond_24():
@@ -37,6 +41,20 @@ def test_validate_session_inputs_accepts_explicit_next_day_end_date():
 
     assert start_dt == datetime(2026, 4, 26, 23, 30)
     assert end_dt == datetime(2026, 4, 27, 0, 30)
+
+
+def test_sync_end_date_for_start_change_keeps_same_day_default():
+    assert (
+        sync_end_date_for_start_change("2026-04-26", "2026-04-27", "2026-04-26")
+        == "2026-04-27"
+    )
+
+
+def test_sync_end_date_for_start_change_preserves_multi_day_span():
+    assert (
+        sync_end_date_for_start_change("2026-04-26", "2026-04-28", "2026-04-29")
+        == "2026-05-01"
+    )
 
 
 @pytest.mark.parametrize("time_text", ["24:60", "-1:00", "25"])
