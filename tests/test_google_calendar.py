@@ -1,3 +1,4 @@
+from datetime import timedelta, timezone
 from pathlib import Path
 
 from modules import google_calendar
@@ -164,5 +165,52 @@ def test_create_reading_event_wraps_unexpected_insert_errors(monkeypatch):
         )
     except google_calendar.GoogleCalendarIntegrationError as exc:
         assert "Googleカレンダーへの登録" in str(exc)
+    else:
+        raise AssertionError("GoogleCalendarIntegrationError was not raised")
+
+
+def test_create_calendar_event_builds_generic_event_body(monkeypatch):
+    captured = {}
+
+    def fake_insert_event_body(event_body, **kwargs):
+        captured["event_body"] = event_body
+        captured["kwargs"] = kwargs
+        return "https://calendar.google.com/generic-event"
+
+    monkeypatch.setattr(google_calendar, "_insert_event_body", fake_insert_event_body)
+
+    event_link = google_calendar.create_calendar_event(
+        summary="Reading meetup",
+        start_dt=google_calendar.datetime(
+            2026, 5, 8, 10, 0, tzinfo=timezone(timedelta(hours=9))
+        ),
+        end_dt=google_calendar.datetime(
+            2026, 5, 8, 11, 0, tzinfo=timezone(timedelta(hours=9))
+        ),
+        description="Discuss books",
+        location="Library",
+        calendar_id="secondary",
+    )
+
+    assert event_link == "https://calendar.google.com/generic-event"
+    assert captured["event_body"] == {
+        "summary": "Reading meetup",
+        "description": "Discuss books",
+        "location": "Library",
+        "start": {"dateTime": "2026-05-08T10:00:00+09:00"},
+        "end": {"dateTime": "2026-05-08T11:00:00+09:00"},
+    }
+    assert captured["kwargs"]["calendar_id"] == "secondary"
+
+
+def test_create_calendar_event_rejects_non_positive_duration():
+    try:
+        google_calendar.create_calendar_event(
+            summary="Invalid event",
+            start_dt=google_calendar.datetime(2026, 5, 8, 10, 0),
+            end_dt=google_calendar.datetime(2026, 5, 8, 10, 0),
+        )
+    except google_calendar.GoogleCalendarIntegrationError as exc:
+        assert "終了日時は開始日時より後" in str(exc)
     else:
         raise AssertionError("GoogleCalendarIntegrationError was not raised")

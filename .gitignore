@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .venv/
+.jupyter/
+debug.log
 .book_timer_state.json
 data/*.parquet
 credentials.json

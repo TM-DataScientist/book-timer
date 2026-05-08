@@ -37,9 +37,6 @@ def create_reading_event(
     token_path: Path = DEFAULT_TOKEN_PATH,
 ) -> str:
     """Insert a reading session event into Google Calendar and return its link."""
-    build, http_error = _import_google_calendar_client()
-    credentials = _load_credentials(credentials_path, token_path)
-    service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
     event_body = {
         "summary": _build_event_summary(book_title, start_page, end_page),
         "description": "\n".join(
@@ -62,6 +59,57 @@ def create_reading_event(
             }
         },
     }
+    return _insert_event_body(
+        event_body,
+        calendar_id=calendar_id,
+        credentials_path=credentials_path,
+        token_path=token_path,
+    )
+
+
+def create_calendar_event(
+    *,
+    summary: str,
+    start_dt: datetime,
+    end_dt: datetime,
+    description: str = "",
+    location: str = "",
+    calendar_id: str = DEFAULT_CALENDAR_ID,
+    credentials_path: Path = DEFAULT_CREDENTIALS_PATH,
+    token_path: Path = DEFAULT_TOKEN_PATH,
+) -> str:
+    """Insert a generic event into Google Calendar and return its link."""
+    if end_dt <= start_dt:
+        raise GoogleCalendarIntegrationError(
+            "Googleカレンダーに登録する終了日時は開始日時より後にしてください。"
+        )
+
+    event_body = {
+        "summary": summary,
+        "description": description,
+        "location": location,
+        "start": {"dateTime": _to_rfc3339(start_dt)},
+        "end": {"dateTime": _to_rfc3339(end_dt)},
+    }
+    return _insert_event_body(
+        event_body,
+        calendar_id=calendar_id,
+        credentials_path=credentials_path,
+        token_path=token_path,
+    )
+
+
+def _insert_event_body(
+    event_body: dict,
+    *,
+    calendar_id: str,
+    credentials_path: Path,
+    token_path: Path,
+) -> str:
+    """Insert a prepared event body into Google Calendar and return its link."""
+    build, http_error = _import_google_calendar_client()
+    credentials = _load_credentials(credentials_path, token_path)
+    service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
 
     try:
         event = service.events().insert(calendarId=calendar_id, body=event_body).execute()
