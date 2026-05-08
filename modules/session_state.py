@@ -10,6 +10,8 @@ READING_HISTORY_FIELD = "reading_history"
 DATE_FORMAT = "%Y-%m-%d"
 STATE_FIELDS = (
     "book_title",
+    "start_date",
+    "end_date",
     "session_date",
     "start_time",
     "end_time",
@@ -25,12 +27,19 @@ class SessionStateError(RuntimeError):
 def load_form_state(state_path: Path = DEFAULT_STATE_PATH) -> dict[str, str]:
     """Load the previously saved form values, if available."""
     data = _load_state_data(state_path)
-
-    return {
+    state = {
         field: _normalize_value(data.get(field))
         for field in STATE_FIELDS
         if field in data
     }
+
+    legacy_session_date = state.get("session_date", "")
+    if "start_date" not in state and legacy_session_date:
+        state["start_date"] = legacy_session_date
+    if "end_date" not in state and legacy_session_date:
+        state["end_date"] = legacy_session_date
+
+    return state
 
 
 def load_book_titles(state_path: Path = DEFAULT_STATE_PATH) -> list[str]:
@@ -55,6 +64,8 @@ def save_form_state(
         field: _normalize_value(form_state.get(field, ""))
         for field in STATE_FIELDS
     }
+    if not payload["session_date"]:
+        payload["session_date"] = payload["start_date"]
     payload[BOOKS_FIELD] = _normalize_book_titles(book_titles)
 
     try:

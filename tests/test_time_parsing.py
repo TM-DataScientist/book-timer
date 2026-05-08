@@ -15,6 +15,7 @@ def test_validate_session_inputs_accepts_overnight_25_hour_end_time():
     start_dt, end_dt = validate_session_inputs(
         "2026-04-26",
         "22:00",
+        "2026-04-26",
         "25:00",
         10,
         40,
@@ -22,6 +23,20 @@ def test_validate_session_inputs_accepts_overnight_25_hour_end_time():
 
     assert start_dt == datetime(2026, 4, 26, 22, 0)
     assert end_dt == datetime(2026, 4, 27, 1, 0)
+
+
+def test_validate_session_inputs_accepts_explicit_next_day_end_date():
+    start_dt, end_dt = validate_session_inputs(
+        "2026-04-26",
+        "23:30",
+        "2026-04-27",
+        "00:30",
+        10,
+        40,
+    )
+
+    assert start_dt == datetime(2026, 4, 26, 23, 30)
+    assert end_dt == datetime(2026, 4, 27, 0, 30)
 
 
 @pytest.mark.parametrize("time_text", ["24:60", "-1:00", "25"])

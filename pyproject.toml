@@ -23,3 +23,4 @@ package = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+norecursedirs = [".jupyter", ".pytest_tmp", "pytest_tmp*"]

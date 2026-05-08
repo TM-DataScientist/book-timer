@@ -31,7 +31,8 @@ DATE_FORMAT = "%Y-%m-%d"
 APP_TITLE = "読書タイマー"
 SETUP_TITLE = "セッション設定"
 BOOK_TITLE_LABEL = "書名"
-DATE_LABEL = "日付"
+START_DATE_LABEL = "開始日"
+END_DATE_LABEL = "終了日"
 START_TIME_LABEL = "開始時刻"
 END_TIME_LABEL = "終了時刻"
 START_PAGE_LABEL = "開始ページ"
@@ -41,7 +42,7 @@ REGISTER_CALENDAR_LABEL = "Googleカレンダーに登録"
 ADD_READING_HISTORY_LABEL = "読了リストに追加"
 DELETE_BOOK_LABEL = "削除"
 EMPTY_BOOK_TEXT = "書名 --"
-EMPTY_TIME_TEXT = "日付 ----/--/-- / 開始 --:-- / 終了 --:--"
+EMPTY_TIME_TEXT = "開始 ----/--/-- --:-- / 終了 ----/--/-- --:--"
 EMPTY_PAGE_TEXT = "ページ -- -> --"
 READING_HISTORY_TITLE = "読了リスト"
 LATEST_READING_EMPTY_TEXT = "最新の読了: まだ記録がありません。"
@@ -217,18 +218,20 @@ def normalize_session_date(date_text: str) -> str:
 
 
 def validate_session_inputs(
-    session_date: str,
+    start_date: str,
     start_time: str,
+    end_date: str,
     end_time: str,
     start_page: int,
     end_page: int,
 ) -> tuple[datetime, datetime]:
-    """Validate time/page inputs and return parsed datetimes."""
-    session_reference = parse_session_date(session_date)
+    """Validate date/time/page inputs and return parsed datetimes."""
+    start_reference = parse_session_date(start_date)
+    end_reference = parse_session_date(end_date)
 
     try:
-        start_dt = parse_time_on_date(start_time, session_reference)
-        end_dt = parse_time_on_date(end_time, session_reference)
+        start_dt = parse_time_on_date(start_time, start_reference)
+        end_dt = parse_time_on_date(end_time, end_reference)
     except ValueError as exc:
         raise ValueError(
             "時刻は HH:MM 形式で入力してください。24:00 以降は翌日の時刻として扱います。"
@@ -244,22 +247,40 @@ def validate_session_inputs(
 
 
 def collect_session_inputs(
-    session_date: str,
+    start_date: str,
     start_time: str,
+    end_date: str,
     end_time: str,
     start_page_text: str,
     end_page_text: str,
-) -> tuple[str, str, str, int, int]:
+) -> tuple[str, str, str, str, int, int]:
     """Parse and validate form values into a session tuple."""
+    normalized_start_date = normalize_session_date(start_date)
+    normalized_end_date = normalize_session_date(end_date)
     start_page = parse_page(start_page_text, START_PAGE_LABEL)
     end_page = parse_page(end_page_text, END_PAGE_LABEL)
-    validate_session_inputs(session_date, start_time, end_time, start_page, end_page)
-    return session_date, start_time, end_time, start_page, end_page
+    validate_session_inputs(
+        normalized_start_date,
+        start_time,
+        normalized_end_date,
+        end_time,
+        start_page,
+        end_page,
+    )
+    return (
+        normalized_start_date,
+        start_time,
+        normalized_end_date,
+        end_time,
+        start_page,
+        end_page,
+    )
 
 
 def calculate_pages(
-    session_date: str,
+    start_date: str,
     start_time: str,
+    end_date: str,
     end_time: str,
     start_page: int,
     end_page: int,
@@ -269,8 +290,9 @@ def calculate_pages(
 
     try:
         start_dt, end_dt = validate_session_inputs(
-            session_date,
+            start_date,
             start_time,
+            end_date,
             end_time,
             start_page,
             end_page,
@@ -327,12 +349,17 @@ def run_app() -> None:
         book_titles.sort(key=str.casefold)
 
     book_title_var = tk.StringVar(value=saved_form_state.get("book_title", ""))
-    date_var = tk.StringVar(
-        value=saved_form_state.get(
-            "session_date",
-            datetime.now().strftime(DATE_FORMAT),
-        )
+    default_date = datetime.now().strftime(DATE_FORMAT)
+    saved_start_date = saved_form_state.get(
+        "start_date",
+        saved_form_state.get("session_date", default_date),
     )
+    saved_end_date = saved_form_state.get(
+        "end_date",
+        saved_form_state.get("session_date", saved_start_date),
+    )
+    start_date_var = tk.StringVar(value=saved_start_date)
+    end_date_var = tk.StringVar(value=saved_end_date)
     start_time_var = tk.StringVar(
         value=saved_form_state.get("start_time", DEFAULT_START_TIME)
     )
@@ -345,7 +372,7 @@ def run_app() -> None:
     time_label_var = tk.StringVar(value=EMPTY_TIME_TEXT)
     page_label_var = tk.StringVar(value=EMPTY_PAGE_TEXT)
     latest_reading_var = tk.StringVar(value=build_latest_reading_text(reading_history))
-    current_session: tuple[str, str, str, int, int] | None = None
+    current_session: tuple[str, str, str, str, int, int] | None = None
     scheduled_update_id: str | None = None
     calendar_result_queue: queue.Queue[tuple[str, str]] = queue.Queue()
     calendar_poll_id: str | None = None
@@ -382,11 +409,18 @@ def run_app() -> None:
     )
     delete_book_button.grid(row=0, column=3, pady=4, sticky="ew")
 
-    tk.Label(form_frame, text=DATE_LABEL, font=info_font).grid(
+    tk.Label(form_frame, text=START_DATE_LABEL, font=info_font).grid(
         row=1, column=0, padx=(0, 8), pady=4, sticky="w"
     )
-    tk.Entry(form_frame, textvariable=date_var, font=info_font).grid(
-        row=1, column=1, columnspan=3, pady=4, sticky="ew"
+    tk.Entry(form_frame, textvariable=start_date_var, font=info_font).grid(
+        row=1, column=1, padx=(0, 12), pady=4, sticky="ew"
+    )
+
+    tk.Label(form_frame, text=END_DATE_LABEL, font=info_font).grid(
+        row=1, column=2, padx=(0, 8), pady=4, sticky="w"
+    )
+    tk.Entry(form_frame, textvariable=end_date_var, font=info_font).grid(
+        row=1, column=3, pady=4, sticky="ew"
     )
 
     tk.Label(form_frame, text=START_TIME_LABEL, font=info_font).grid(
@@ -556,9 +590,13 @@ def run_app() -> None:
         add_reading_history_button.config(state="disabled" if is_running else "normal")
 
     def get_form_state() -> dict[str, str]:
+        start_date = start_date_var.get().strip()
+        end_date = end_date_var.get().strip()
         return {
             "book_title": book_title_var.get().strip(),
-            "session_date": date_var.get().strip(),
+            "start_date": start_date,
+            "end_date": end_date,
+            "session_date": start_date,
             "start_time": start_time_var.get().strip(),
             "end_time": end_time_var.get().strip(),
             "start_page": start_page_var.get().strip(),
@@ -583,6 +621,18 @@ def run_app() -> None:
     def persist_reading_history(history_entries: list[dict[str, str]]) -> None:
         save_reading_history(history_entries)
 
+    previous_start_date = start_date_var.get().strip()
+
+    def sync_end_date_default(*_args) -> None:
+        nonlocal previous_start_date
+        current_start_date = start_date_var.get().strip()
+        current_end_date = end_date_var.get().strip()
+
+        if not current_end_date or current_end_date == previous_start_date:
+            end_date_var.set(current_start_date)
+
+        previous_start_date = current_start_date
+
     def refresh_reading_history_display() -> None:
         latest_reading_var.set(build_latest_reading_text(reading_history))
         reading_stats_listbox.delete(0, tk.END)
@@ -601,7 +651,7 @@ def run_app() -> None:
     def add_reading_history_entry() -> None:
         try:
             book_title = parse_book_title(book_title_var.get())
-            session_date = normalize_session_date(date_var.get().strip())
+            session_date = normalize_session_date(start_date_var.get().strip())
         except ValueError as exc:
             error_var.set(str(exc))
             calendar_status_var.set("")
@@ -672,23 +722,28 @@ def run_app() -> None:
 
     def set_session_state(
         book_title: str,
-        session_values: tuple[str, str, str, int, int],
+        session_values: tuple[str, str, str, str, int, int],
     ) -> None:
         nonlocal current_session
 
-        session_date, start_time, end_time, start_page, end_page = session_values
+        start_date, start_time, end_date, end_time, start_page, end_page = (
+            session_values
+        )
         current_session = session_values
         book_label_var.set(f"書名 {book_title}" if book_title else "書名 未入力")
-        time_label_var.set(f"日付 {session_date} / 開始 {start_time} / 終了 {end_time}")
+        time_label_var.set(
+            f"開始 {start_date} {start_time} / 終了 {end_date} {end_time}"
+        )
         page_label_var.set(f"ページ {start_page} -> {end_page}")
         error_var.set("")
         schedule_progress_update(0)
 
-    def read_form_values() -> tuple[str, tuple[str, str, str, int, int]]:
+    def read_form_values() -> tuple[str, tuple[str, str, str, str, int, int]]:
         book_title = book_title_var.get().strip()
         session_values = collect_session_inputs(
-            date_var.get().strip(),
+            start_date_var.get().strip(),
             start_time_var.get().strip(),
+            end_date_var.get().strip(),
             end_time_var.get().strip(),
             start_page_var.get(),
             end_page_var.get(),
@@ -783,10 +838,13 @@ def run_app() -> None:
             )
             remember_book_title(book_title)
             set_session_state(book_title, session_values)
-            session_date, start_time, end_time, start_page, end_page = session_values
+            start_date, start_time, end_date, end_time, start_page, end_page = (
+                session_values
+            )
             start_dt, end_dt = validate_session_inputs(
-                session_date,
+                start_date,
                 start_time,
+                end_date,
                 end_time,
                 start_page,
                 end_page,
@@ -794,7 +852,7 @@ def run_app() -> None:
             set_calendar_registration_state(True)
             start_calendar_registration_worker(
                 book_title=calendar_book_title,
-                session_date=session_date,
+                session_date=start_date,
                 start_dt=start_dt,
                 end_dt=end_dt,
                 start_page=start_page,
@@ -813,11 +871,14 @@ def run_app() -> None:
             progress_label.config(text=READY_TEXT)
             return
 
-        session_date, start_time, end_time, start_page, end_page = current_session
+        start_date, start_time, end_date, end_time, start_page, end_page = (
+            current_session
+        )
         progress_label.config(
             text=calculate_pages(
-                session_date,
+                start_date,
                 start_time,
+                end_date,
                 end_time,
                 start_page,
                 end_page,
@@ -825,8 +886,9 @@ def run_app() -> None:
         )
 
         _, end_dt = validate_session_inputs(
-            session_date,
+            start_date,
             start_time,
+            end_date,
             end_time,
             start_page,
             end_page,
@@ -887,6 +949,7 @@ def run_app() -> None:
 
     root.bind("<Configure>", adjust_layout)
     root.bind("<Return>", apply_session)
+    start_date_var.trace_add("write", sync_end_date_default)
     root.after(0, adjust_layout)
     root.after(0, refresh_reading_history_display)
     root.after(0, restore_saved_session)
