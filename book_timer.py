@@ -38,6 +38,7 @@ END_TIME_LABEL = "終了時刻"
 START_PAGE_LABEL = "開始ページ"
 END_PAGE_LABEL = "終了ページ"
 APPLY_LABEL = "反映"
+SET_START_NOW_LABEL = "開始=現在"
 REGISTER_CALENDAR_LABEL = "Googleカレンダーに登録"
 ADD_READING_HISTORY_LABEL = "読了リストに追加"
 DELETE_BOOK_LABEL = "削除"
@@ -215,6 +216,11 @@ def has_same_book_title(
 def normalize_session_date(date_text: str) -> str:
     """Normalize a supported date input to YYYY-MM-DD."""
     return parse_session_date(date_text).strftime(DATE_FORMAT)
+
+
+def format_current_start_values(now: datetime) -> tuple[str, str]:
+    """Return date and HH:MM values for setting a session start to now."""
+    return now.strftime(DATE_FORMAT), now.strftime("%H:%M")
 
 
 def sync_end_date_for_start_change(
@@ -438,8 +444,23 @@ def run_app() -> None:
     tk.Label(form_frame, text=START_TIME_LABEL, font=info_font).grid(
         row=1, column=2, padx=(0, 8), pady=4, sticky="w"
     )
-    tk.Entry(form_frame, textvariable=start_time_var, font=info_font).grid(
-        row=1, column=3, pady=4, sticky="ew"
+    start_time_frame = tk.Frame(form_frame)
+    start_time_frame.grid(row=1, column=3, pady=4, sticky="ew")
+    start_time_frame.columnconfigure(0, weight=1)
+    tk.Entry(start_time_frame, textvariable=start_time_var, font=info_font).grid(
+        row=0, column=0, sticky="ew"
+    )
+    set_start_now_button = tk.Button(
+        start_time_frame,
+        text=SET_START_NOW_LABEL,
+        font=info_font,
+        command=lambda: set_start_to_now(),
+    )
+    set_start_now_button.grid(
+        row=0,
+        column=1,
+        padx=(8, 0),
+        sticky="e",
     )
 
     tk.Label(form_frame, text=END_DATE_LABEL, font=info_font).grid(
@@ -605,6 +626,7 @@ def run_app() -> None:
         nonlocal calendar_registration_in_progress
         calendar_registration_in_progress = is_running
         register_calendar_button.config(state="disabled" if is_running else "normal")
+        set_start_now_button.config(state="disabled" if is_running else "normal")
         apply_button.config(state="disabled" if is_running else "normal")
         add_reading_history_button.config(state="disabled" if is_running else "normal")
 
@@ -658,6 +680,28 @@ def run_app() -> None:
 
         end_date_var.set(synced_end_date)
         previous_start_date = normalize_session_date(current_start_date)
+
+    def set_start_to_now() -> None:
+        nonlocal previous_start_date
+        current_start_date, current_start_time = format_current_start_values(
+            datetime.now()
+        )
+
+        try:
+            synced_end_date = sync_end_date_for_start_change(
+                previous_start_date,
+                current_start_date,
+                end_date_var.get().strip(),
+            )
+        except ValueError:
+            synced_end_date = current_start_date
+
+        start_date_var.set(current_start_date)
+        start_time_var.set(current_start_time)
+        end_date_var.set(synced_end_date)
+        previous_start_date = current_start_date
+        error_var.set("")
+        calendar_status_var.set("")
 
     def refresh_reading_history_display() -> None:
         latest_reading_var.set(build_latest_reading_text(reading_history))

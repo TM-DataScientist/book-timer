@@ -3,6 +3,7 @@ from datetime import datetime
 import pytest
 
 from book_timer import (
+    format_current_start_values,
     parse_time_on_date,
     sync_end_date_for_start_change,
     validate_session_inputs,
@@ -54,6 +55,13 @@ def test_sync_end_date_for_start_change_preserves_multi_day_span():
     assert (
         sync_end_date_for_start_change("2026-04-26", "2026-04-28", "2026-04-29")
         == "2026-05-01"
+    )
+
+
+def test_format_current_start_values_uses_date_and_minute_precision():
+    assert format_current_start_values(datetime(2026, 5, 11, 9, 7, 42)) == (
+        "2026-05-11",
+        "09:07",
     )
 
 
