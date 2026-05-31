@@ -26,7 +26,7 @@ from modules.session_state import (
 )
 
 DEFAULT_WIDTH = 560
-DEFAULT_HEIGHT = 620
+DEFAULT_HEIGHT = 650
 DATE_FORMAT = "%Y-%m-%d"
 APP_TITLE = "読書タイマー"
 SETUP_TITLE = "セッション設定"
@@ -39,6 +39,9 @@ START_PAGE_LABEL = "開始ページ"
 END_PAGE_LABEL = "終了ページ"
 APPLY_LABEL = "反映"
 SET_START_NOW_LABEL = "開始=現在"
+SHIFT_DATES_NEXT_DAY_LABEL = "日付+1日"
+PAGE_INCREMENT_LABEL = "加算ページ"
+ADD_PAGE_INCREMENT_LABEL = "ページ加算"
 REGISTER_CALENDAR_LABEL = "Googleカレンダーに登録"
 ADD_READING_HISTORY_LABEL = "読了リストに追加"
 DELETE_BOOK_LABEL = "削除"
@@ -243,6 +246,37 @@ def sync_end_date_for_start_change(
     return shifted_end_dt.strftime(DATE_FORMAT)
 
 
+def shift_session_dates_by_days(
+    start_date: str,
+    end_date: str,
+    day_count: int,
+) -> tuple[str, str]:
+    """Return start and end dates shifted by a whole number of days."""
+    start_dt = parse_session_date(start_date)
+    end_dt = parse_session_date(end_date)
+    date_delta = timedelta(days=day_count)
+    return (
+        (start_dt + date_delta).strftime(DATE_FORMAT),
+        (end_dt + date_delta).strftime(DATE_FORMAT),
+    )
+
+
+def increment_page_range(
+    start_page_text: str,
+    end_page_text: str,
+    increment_text: str,
+) -> tuple[str, str]:
+    """Return start and end page values increased by the requested amount."""
+    start_page = parse_page(start_page_text, START_PAGE_LABEL)
+    end_page = parse_page(end_page_text, END_PAGE_LABEL)
+    increment = parse_page(increment_text, PAGE_INCREMENT_LABEL)
+
+    if increment < 0:
+        raise ValueError(f"{PAGE_INCREMENT_LABEL}は0以上の整数で入力してください。")
+
+    return str(start_page + increment), str(end_page + increment)
+
+
 def validate_session_inputs(
     start_date: str,
     start_time: str,
@@ -392,6 +426,7 @@ def run_app() -> None:
     end_time_var = tk.StringVar(value=saved_form_state.get("end_time", DEFAULT_END_TIME))
     start_page_var = tk.StringVar(value=saved_form_state.get("start_page", ""))
     end_page_var = tk.StringVar(value=saved_form_state.get("end_page", ""))
+    page_increment_var = tk.StringVar()
     error_var = tk.StringVar(value=startup_error_message)
     calendar_status_var = tk.StringVar()
     book_label_var = tk.StringVar(value=EMPTY_BOOK_TEXT)
@@ -489,6 +524,44 @@ def run_app() -> None:
     )
     tk.Entry(form_frame, textvariable=end_page_var, font=info_font).grid(
         row=3, column=3, pady=4, sticky="ew"
+    )
+
+    shift_dates_next_day_button = tk.Button(
+        form_frame,
+        text=SHIFT_DATES_NEXT_DAY_LABEL,
+        font=info_font,
+        command=lambda: shift_dates_to_next_day(),
+    )
+    shift_dates_next_day_button.grid(
+        row=4,
+        column=1,
+        padx=(0, 12),
+        pady=4,
+        sticky="ew",
+    )
+
+    tk.Label(form_frame, text=PAGE_INCREMENT_LABEL, font=info_font).grid(
+        row=4, column=2, padx=(0, 8), pady=4, sticky="w"
+    )
+    page_increment_frame = tk.Frame(form_frame)
+    page_increment_frame.grid(row=4, column=3, pady=4, sticky="ew")
+    page_increment_frame.columnconfigure(0, weight=1)
+    tk.Entry(
+        page_increment_frame,
+        textvariable=page_increment_var,
+        font=info_font,
+    ).grid(row=0, column=0, sticky="ew")
+    add_page_increment_button = tk.Button(
+        page_increment_frame,
+        text=ADD_PAGE_INCREMENT_LABEL,
+        font=info_font,
+        command=lambda: add_page_increment(),
+    )
+    add_page_increment_button.grid(
+        row=0,
+        column=1,
+        padx=(8, 0),
+        sticky="e",
     )
 
     button_frame = tk.Frame(root)
@@ -627,6 +700,10 @@ def run_app() -> None:
         calendar_registration_in_progress = is_running
         register_calendar_button.config(state="disabled" if is_running else "normal")
         set_start_now_button.config(state="disabled" if is_running else "normal")
+        shift_dates_next_day_button.config(
+            state="disabled" if is_running else "normal"
+        )
+        add_page_increment_button.config(state="disabled" if is_running else "normal")
         apply_button.config(state="disabled" if is_running else "normal")
         add_reading_history_button.config(state="disabled" if is_running else "normal")
 
@@ -700,6 +777,42 @@ def run_app() -> None:
         start_time_var.set(current_start_time)
         end_date_var.set(synced_end_date)
         previous_start_date = current_start_date
+        error_var.set("")
+        calendar_status_var.set("")
+
+    def shift_dates_to_next_day() -> None:
+        nonlocal previous_start_date
+        try:
+            shifted_start_date, shifted_end_date = shift_session_dates_by_days(
+                start_date_var.get().strip(),
+                end_date_var.get().strip(),
+                1,
+            )
+        except ValueError as exc:
+            error_var.set(str(exc))
+            calendar_status_var.set("")
+            return
+
+        start_date_var.set(shifted_start_date)
+        end_date_var.set(shifted_end_date)
+        previous_start_date = shifted_start_date
+        error_var.set("")
+        calendar_status_var.set("")
+
+    def add_page_increment() -> None:
+        try:
+            shifted_start_page, shifted_end_page = increment_page_range(
+                start_page_var.get(),
+                end_page_var.get(),
+                page_increment_var.get(),
+            )
+        except ValueError as exc:
+            error_var.set(str(exc))
+            calendar_status_var.set("")
+            return
+
+        start_page_var.set(shifted_start_page)
+        end_page_var.set(shifted_end_page)
         error_var.set("")
         calendar_status_var.set("")
 

@@ -4,7 +4,9 @@ import pytest
 
 from book_timer import (
     format_current_start_values,
+    increment_page_range,
     parse_time_on_date,
+    shift_session_dates_by_days,
     sync_end_date_for_start_change,
     validate_session_inputs,
 )
@@ -63,6 +65,22 @@ def test_format_current_start_values_uses_date_and_minute_precision():
         "2026-05-11",
         "09:07",
     )
+
+
+def test_shift_session_dates_by_days_advances_start_and_end_dates():
+    assert shift_session_dates_by_days("2026-05-31", "2026-06-02", 1) == (
+        "2026-06-01",
+        "2026-06-03",
+    )
+
+
+def test_increment_page_range_adds_increment_to_start_and_end_pages():
+    assert increment_page_range("10", "30", "5") == ("15", "35")
+
+
+def test_increment_page_range_rejects_negative_increment():
+    with pytest.raises(ValueError, match="0以上"):
+        increment_page_range("10", "30", "-1")
 
 
 @pytest.mark.parametrize("time_text", ["24:60", "-1:00", "25"])
