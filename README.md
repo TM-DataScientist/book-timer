@@ -55,6 +55,14 @@ cd ..
 
 Windowsでは、リポジトリ直下の `start_web_app.cmd` をダブルクリックします。依存関係が未導入の場合は自動でセットアップし、フロントエンドをビルドしてからブラウザを開きます。
 
+デスクトップへ `Book Timer` ショートカットを作成・更新する場合:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\create_book_timer_shortcut.ps1
+```
+
+作成後はデスクトップの `Book Timer` アイコンをダブルクリックするだけで起動できます。すでにサーバーが動作中の場合は、二重起動せず既存画面をブラウザで開きます。
+
 PowerShellから起動する場合:
 
 ```powershell

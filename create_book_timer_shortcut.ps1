@@ -1,5 +1,5 @@
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$launcherPath = Join-Path $repoRoot "start_book_timer.cmd"
+$launcherPath = Join-Path $repoRoot "start_web_app.cmd"
 $desktopPath = [Environment]::GetFolderPath("Desktop")
 $shortcutPath = Join-Path $desktopPath "Book Timer.lnk"
 
@@ -13,7 +13,7 @@ $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $launcherPath
 $shortcut.WorkingDirectory = $repoRoot
 $shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,13"
-$shortcut.Description = "Launch the Reading Books Timer app"
+$shortcut.Description = "Launch Book Timer in the web browser"
 $shortcut.Save()
 
 Write-Host "Shortcut created:" $shortcutPath

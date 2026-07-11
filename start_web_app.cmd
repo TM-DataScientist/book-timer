@@ -3,6 +3,12 @@ setlocal
 
 cd /d "%~dp0"
 
+powershell.exe -NoProfile -Command "try { $response = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 1; if ($response.status -eq 'ok') { exit 0 }; exit 1 } catch { exit 1 }"
+if not errorlevel 1 (
+    start "" "http://127.0.0.1:8000"
+    exit /b 0
+)
+
 where uv >nul 2>nul
 if errorlevel 1 (
     echo uv was not found.
