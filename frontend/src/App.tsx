@@ -384,6 +384,7 @@ export default function App() {
             <TodayEvents
               date={eventsDate}
               events={events}
+              session={session}
               connected={calendarConnected}
               loading={busy === "events"}
               onRefresh={() => void refreshCalendar()}

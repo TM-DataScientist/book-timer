@@ -1,11 +1,13 @@
 import { CalendarDays, RefreshCw } from "lucide-react";
 
-import type { CalendarEvent } from "../types";
-import { formatCalendarTime, formatJapaneseDate } from "../utils";
+import type { CalendarEvent, Session } from "../types";
+import { formatJapaneseDate } from "../utils";
+import { DayTimeline } from "./DayTimeline";
 
 interface TodayEventsProps {
   date: string;
   events: CalendarEvent[];
+  session: Session | null;
   connected: boolean;
   loading: boolean;
   onRefresh: () => void;
@@ -14,6 +16,7 @@ interface TodayEventsProps {
 export function TodayEvents({
   date,
   events,
+  session,
   connected,
   loading,
   onRefresh,
@@ -47,32 +50,20 @@ export function TodayEvents({
         {formatJapaneseDate(date)}
       </div>
 
-      <div className="table-wrap events-table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>時間</th>
-              <th>予定</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((event, index) => (
-              <tr key={`${event.start ?? "all-day"}-${event.summary}-${index}`}>
-                <td className="event-time">{formatCalendarTime(event)}</td>
-                <td>{event.summary}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!loading && events.length === 0 ? (
-          <div className="empty-state">
-            {connected
+      {loading ? (
+        <div className="loading-row">予定を取得中...</div>
+      ) : (
+        <DayTimeline
+          date={date}
+          events={events}
+          session={session}
+          emptyMessage={
+            connected
               ? "今日の予定はありません。"
-              : "更新するとGoogleアカウントの認証が始まります。"}
-          </div>
-        ) : null}
-        {loading ? <div className="loading-row">予定を取得中...</div> : null}
-      </div>
+              : "更新するとGoogleアカウントの認証が始まります。"
+          }
+        />
+      )}
     </section>
   );
 }
