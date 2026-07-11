@@ -1,19 +1,22 @@
 [project]
 name = "reading-books-timer"
 version = "0.1.0"
-description = "Tkinter reading timer with optional Google Calendar integration."
+description = "Local React and FastAPI reading timer with Google Calendar integration."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "fastapi>=0.115.0",
     "google-api-python-client>=2.170.0",
     "google-auth-httplib2>=0.2.0",
     "google-auth-oauthlib>=1.2.2",
     "pandas>=2.2.0",
     "pyarrow>=15.0.0",
+    "uvicorn[standard]>=0.34.0",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.5.0",
     "ipykernel>=7.2.0",
     "pytest>=8.3.5",
 ]

@@ -1,15 +1,17 @@
 import queue
 import threading
 import tkinter as tk
-from calendar import monthrange
 from tkinter import font as tkfont
 from tkinter import messagebox
 from tkinter import ttk
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from modules.google_calendar import (
+    CalendarEvent,
     GoogleCalendarIntegrationError,
     create_reading_event,
+    get_today_events,
+    has_cached_calendar_credentials,
 )
 from modules.reading_history_store import (
     ReadingHistoryStoreError,
@@ -17,6 +19,26 @@ from modules.reading_history_store import (
     normalize_reading_history,
     save_reading_history,
     summarize_reading_history,
+)
+from modules.reading_session import (
+    DATE_FORMAT,
+    add_months,
+    calculate_pages,
+    collect_session_inputs,
+    format_current_start_values,
+    has_recent_same_book_title,
+    has_same_book_title,
+    has_same_reading_entry,
+    increment_page_range,
+    is_less_than_one_month_apart,
+    normalize_session_date,
+    parse_book_title,
+    parse_page,
+    parse_session_date,
+    parse_time_on_date,
+    shift_session_dates_by_days,
+    sync_end_date_for_start_change,
+    validate_session_inputs,
 )
 from modules.session_state import (
     SessionStateError,
@@ -26,8 +48,7 @@ from modules.session_state import (
 )
 
 DEFAULT_WIDTH = 560
-DEFAULT_HEIGHT = 650
-DATE_FORMAT = "%Y-%m-%d"
+DEFAULT_HEIGHT = 800
 APP_TITLE = "読書タイマー"
 SETUP_TITLE = "セッション設定"
 BOOK_TITLE_LABEL = "書名"
@@ -43,6 +64,17 @@ SHIFT_DATES_NEXT_DAY_LABEL = "日付+1日"
 PAGE_INCREMENT_LABEL = "加算ページ"
 ADD_PAGE_INCREMENT_LABEL = "ページ加算"
 REGISTER_CALENDAR_LABEL = "Googleカレンダーに登録"
+TODAY_EVENTS_TITLE = "今日の予定"
+REFRESH_TODAY_EVENTS_LABEL = "更新"
+TODAY_EVENTS_TIME_HEADING = "時間"
+TODAY_EVENTS_SUMMARY_HEADING = "予定"
+TODAY_EVENTS_NOT_LOADED_TEXT = "予定をまだ取得していません。"
+TODAY_EVENTS_EMPTY_TEXT = "今日の予定はありません。"
+TODAY_EVENTS_PROGRESS_TEXT = "Googleカレンダーから今日の予定を取得中です..."
+TODAY_EVENTS_SUCCESS_TEXT = "今日の予定を更新しました。"
+TODAY_EVENTS_UNEXPECTED_ERROR_TEXT = (
+    "今日の予定の取得中に予期しないエラーが発生しました。"
+)
 ADD_READING_HISTORY_LABEL = "読了リストに追加"
 DELETE_BOOK_LABEL = "削除"
 EMPTY_BOOK_TEXT = "書名 --"
@@ -70,54 +102,6 @@ DEFAULT_END_TIME = "24:00"
 CALENDAR_RESULT_POLL_MS = 100
 
 
-def parse_time_on_date(time_text: str, reference: datetime) -> datetime:
-    """Parse HH:MM text on the reference date, allowing hours beyond 24."""
-    normalized = time_text.strip()
-
-    try:
-        hour_text, minute_text = normalized.split(":", maxsplit=1)
-        hours = int(hour_text)
-        minutes = int(minute_text)
-    except ValueError as exc:
-        raise ValueError("Invalid time format") from exc
-
-    if hours < 0 or minutes < 0 or minutes > 59:
-        raise ValueError("Invalid time format")
-
-    midnight = reference.replace(hour=0, minute=0, second=0, microsecond=0)
-    return midnight + timedelta(hours=hours, minutes=minutes)
-
-
-def parse_session_date(date_text: str) -> datetime:
-    """Parse YYYY-MM-DD text and return the date at midnight."""
-    try:
-        parsed = datetime.strptime(date_text.strip(), DATE_FORMAT)
-    except ValueError as exc:
-        raise ValueError("日付は YYYY-MM-DD 形式で入力してください。") from exc
-
-    return parsed.replace(hour=0, minute=0, second=0, microsecond=0)
-
-
-def parse_page(page_text: str, label: str) -> int:
-    """Convert page input to an integer with a readable validation message."""
-    try:
-        return int(page_text.strip())
-    except ValueError as exc:
-        raise ValueError(f"{label}は整数で入力してください。") from exc
-
-
-def parse_book_title(
-    book_text: str,
-    *,
-    missing_message: str = "書名を入力してください。",
-) -> str:
-    """Require a non-empty book title and return the normalized value."""
-    title = book_text.strip()
-    if not title:
-        raise ValueError(missing_message)
-    return title
-
-
 def build_latest_reading_text(reading_history: list[dict[str, str]]) -> str:
     """Build the latest reading summary label from the saved history."""
     if not reading_history:
@@ -133,6 +117,25 @@ def build_latest_reading_text(reading_history: list[dict[str, str]]) -> str:
 def format_reading_history_entry(entry: dict[str, str]) -> str:
     """Render one reading-history row for the on-screen list."""
     return f"{entry['session_date']}  {entry['book_title']}"
+
+
+def build_calendar_event_row(event: CalendarEvent) -> tuple[str, str]:
+    """Return the time and summary columns used by the calendar event table."""
+    if event.is_all_day:
+        time_text = "終日"
+    elif event.start is None:
+        time_text = "時刻未設定"
+    elif event.end is None:
+        time_text = event.start.strftime("%H:%M")
+    elif event.start.date() == event.end.date():
+        time_text = f"{event.start:%H:%M}-{event.end:%H:%M}"
+    else:
+        time_text = (
+            f"{event.start:%m/%d %H:%M}-"
+            f"{event.end:%m/%d %H:%M}"
+        )
+
+    return time_text, event.summary
 
 
 def build_reading_stats_lines(reading_history: list[dict[str, str]]) -> list[str]:
@@ -159,225 +162,6 @@ def build_reading_stats_lines(reading_history: list[dict[str, str]]) -> list[str
     return lines
 
 
-def has_same_reading_entry(
-    reading_history: list[dict[str, str]],
-    session_date: str,
-    book_title: str,
-) -> bool:
-    """Return whether the same normalized title is registered on the same date."""
-    normalized_title = book_title.casefold()
-    return any(
-        entry["session_date"] == session_date
-        and entry["book_title"].casefold() == normalized_title
-        for entry in reading_history
-    )
-
-
-def add_months(value: datetime, month_count: int) -> datetime:
-    """Return a date shifted by whole calendar months."""
-    month_index = value.month - 1 + month_count
-    year = value.year + month_index // 12
-    month = month_index % 12 + 1
-    day = min(value.day, monthrange(year, month)[1])
-    return value.replace(year=year, month=month, day=day)
-
-
-def is_less_than_one_month_apart(first_date: str, second_date: str) -> bool:
-    """Return whether two YYYY-MM-DD dates are separated by less than one month."""
-    first_dt = parse_session_date(first_date)
-    second_dt = parse_session_date(second_date)
-    earlier_dt, later_dt = sorted((first_dt, second_dt))
-    return add_months(earlier_dt, 1) > later_dt
-
-
-def has_recent_same_book_title(
-    reading_history: list[dict[str, str]],
-    session_date: str,
-    book_title: str,
-) -> bool:
-    """Return whether the same title was read less than one month apart."""
-    normalized_title = book_title.casefold()
-    return any(
-        entry["book_title"].casefold() == normalized_title
-        and is_less_than_one_month_apart(entry["session_date"], session_date)
-        for entry in reading_history
-    )
-
-
-def has_same_book_title(
-    reading_history: list[dict[str, str]],
-    book_title: str,
-) -> bool:
-    """Return whether the same normalized title exists anywhere in history."""
-    normalized_title = book_title.casefold()
-    return any(
-        entry["book_title"].casefold() == normalized_title
-        for entry in reading_history
-    )
-
-
-def normalize_session_date(date_text: str) -> str:
-    """Normalize a supported date input to YYYY-MM-DD."""
-    return parse_session_date(date_text).strftime(DATE_FORMAT)
-
-
-def format_current_start_values(now: datetime) -> tuple[str, str]:
-    """Return date and HH:MM values for setting a session start to now."""
-    return now.strftime(DATE_FORMAT), now.strftime("%H:%M")
-
-
-def sync_end_date_for_start_change(
-    previous_start_date: str,
-    current_start_date: str,
-    current_end_date: str,
-) -> str:
-    """Return the end date adjusted by the same date delta as the start date."""
-    normalized_current_start = normalize_session_date(current_start_date)
-    normalized_current_end = current_end_date.strip()
-
-    try:
-        previous_start_dt = parse_session_date(previous_start_date)
-        current_start_dt = parse_session_date(normalized_current_start)
-        current_end_dt = parse_session_date(normalized_current_end)
-    except ValueError:
-        return normalized_current_start
-
-    shifted_end_dt = current_end_dt + (current_start_dt - previous_start_dt)
-    return shifted_end_dt.strftime(DATE_FORMAT)
-
-
-def shift_session_dates_by_days(
-    start_date: str,
-    end_date: str,
-    day_count: int,
-) -> tuple[str, str]:
-    """Return start and end dates shifted by a whole number of days."""
-    start_dt = parse_session_date(start_date)
-    end_dt = parse_session_date(end_date)
-    date_delta = timedelta(days=day_count)
-    return (
-        (start_dt + date_delta).strftime(DATE_FORMAT),
-        (end_dt + date_delta).strftime(DATE_FORMAT),
-    )
-
-
-def increment_page_range(
-    start_page_text: str,
-    end_page_text: str,
-    increment_text: str,
-) -> tuple[str, str]:
-    """Return start and end page values increased by the requested amount."""
-    start_page = parse_page(start_page_text, START_PAGE_LABEL)
-    end_page = parse_page(end_page_text, END_PAGE_LABEL)
-    increment = parse_page(increment_text, PAGE_INCREMENT_LABEL)
-
-    if increment < 0:
-        raise ValueError(f"{PAGE_INCREMENT_LABEL}は0以上の整数で入力してください。")
-
-    return str(start_page + increment), str(end_page + increment)
-
-
-def validate_session_inputs(
-    start_date: str,
-    start_time: str,
-    end_date: str,
-    end_time: str,
-    start_page: int,
-    end_page: int,
-) -> tuple[datetime, datetime]:
-    """Validate date/time/page inputs and return parsed datetimes."""
-    start_reference = parse_session_date(start_date)
-    end_reference = parse_session_date(end_date)
-
-    try:
-        start_dt = parse_time_on_date(start_time, start_reference)
-        end_dt = parse_time_on_date(end_time, end_reference)
-    except ValueError as exc:
-        raise ValueError(
-            "時刻は HH:MM 形式で入力してください。24:00 以降は翌日の時刻として扱います。"
-        ) from exc
-
-    if end_dt <= start_dt:
-        raise ValueError("終了時刻は開始時刻より後にしてください。")
-
-    if end_page < start_page:
-        raise ValueError("終了ページは開始ページ以上にしてください。")
-
-    return start_dt, end_dt
-
-
-def collect_session_inputs(
-    start_date: str,
-    start_time: str,
-    end_date: str,
-    end_time: str,
-    start_page_text: str,
-    end_page_text: str,
-) -> tuple[str, str, str, str, int, int]:
-    """Parse and validate form values into a session tuple."""
-    normalized_start_date = normalize_session_date(start_date)
-    normalized_end_date = normalize_session_date(end_date)
-    start_page = parse_page(start_page_text, START_PAGE_LABEL)
-    end_page = parse_page(end_page_text, END_PAGE_LABEL)
-    validate_session_inputs(
-        normalized_start_date,
-        start_time,
-        normalized_end_date,
-        end_time,
-        start_page,
-        end_page,
-    )
-    return (
-        normalized_start_date,
-        start_time,
-        normalized_end_date,
-        end_time,
-        start_page,
-        end_page,
-    )
-
-
-def calculate_pages(
-    start_date: str,
-    start_time: str,
-    end_date: str,
-    end_time: str,
-    start_page: int,
-    end_page: int,
-) -> str:
-    """Return a friendly status message describing the current reading progress."""
-    now = datetime.now()
-
-    try:
-        start_dt, end_dt = validate_session_inputs(
-            start_date,
-            start_time,
-            end_date,
-            end_time,
-            start_page,
-            end_page,
-        )
-    except ValueError as exc:
-        return str(exc)
-
-    if now < start_dt:
-        minutes = int((start_dt - now).total_seconds() // 60)
-        return f"読書開始まであと {minutes} 分です。"
-
-    if now >= end_dt:
-        return f"読書セッションは終了しました。最終ページ {end_page} を確認してください。"
-
-    total_minutes = (end_dt - start_dt).total_seconds()
-    elapsed_minutes = (now - start_dt).total_seconds()
-    progress = min(max(elapsed_minutes / total_minutes, 0), 1)
-
-    total_pages = max(end_page - start_page, 0) + 1
-    current_page = start_page + int(total_pages * progress)
-    current_page = min(max(current_page, start_page), end_page)
-
-    return f"現在の推定位置: {current_page} ページ"
-
-
 def run_app() -> None:
     """Create and run the Tkinter application."""
     saved_form_state = load_form_state()
@@ -400,6 +184,15 @@ def run_app() -> None:
     progress_font = tkfont.Font(family="Helvetica", size=14)
     combobox_style = ttk.Style(root)
     combobox_style.configure("BookTimer.TCombobox", font=("Helvetica", 12))
+    combobox_style.configure(
+        "BookTimer.Treeview",
+        font=("Helvetica", 11),
+        rowheight=24,
+    )
+    combobox_style.configure(
+        "BookTimer.Treeview.Heading",
+        font=("Helvetica", 10),
+    )
     book_titles = list(saved_book_titles)
     reading_history = list(saved_reading_history)
 
@@ -429,15 +222,19 @@ def run_app() -> None:
     page_increment_var = tk.StringVar()
     error_var = tk.StringVar(value=startup_error_message)
     calendar_status_var = tk.StringVar()
+    now = datetime.now()
+    today_events_date_var = tk.StringVar(
+        value=f"{now.year}年{now.month}月{now.day}日"
+    )
     book_label_var = tk.StringVar(value=EMPTY_BOOK_TEXT)
     time_label_var = tk.StringVar(value=EMPTY_TIME_TEXT)
     page_label_var = tk.StringVar(value=EMPTY_PAGE_TEXT)
     latest_reading_var = tk.StringVar(value=build_latest_reading_text(reading_history))
     current_session: tuple[str, str, str, str, int, int] | None = None
     scheduled_update_id: str | None = None
-    calendar_result_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+    calendar_result_queue: queue.Queue[tuple[str, object]] = queue.Queue()
     calendar_poll_id: str | None = None
-    calendar_registration_in_progress = False
+    calendar_operation_in_progress = False
 
     form_frame = tk.LabelFrame(root, text=SETUP_TITLE, padx=12, pady=12)
     form_frame.pack(fill="x", padx=16, pady=(16, 8))
@@ -642,6 +439,67 @@ def run_app() -> None:
     )
     calendar_status_label.pack(padx=16, pady=(0, 12))
 
+    today_events_frame = tk.LabelFrame(
+        root,
+        text=TODAY_EVENTS_TITLE,
+        padx=12,
+        pady=10,
+    )
+    today_events_frame.pack(fill="x", padx=16, pady=(0, 8))
+    today_events_frame.columnconfigure(0, weight=1)
+
+    today_events_date_label = tk.Label(
+        today_events_frame,
+        textvariable=today_events_date_var,
+        font=info_font,
+        anchor="w",
+    )
+    today_events_date_label.grid(row=0, column=0, sticky="ew")
+
+    refresh_today_events_button = tk.Button(
+        today_events_frame,
+        text=REFRESH_TODAY_EVENTS_LABEL,
+        font=info_font,
+        command=lambda: refresh_today_events(),
+    )
+    refresh_today_events_button.grid(row=0, column=1, padx=(8, 0), sticky="e")
+
+    today_events_table_frame = tk.Frame(today_events_frame)
+    today_events_table_frame.grid(
+        row=1,
+        column=0,
+        columnspan=2,
+        sticky="ew",
+        pady=(8, 0),
+    )
+    today_events_table_frame.columnconfigure(0, weight=1)
+
+    today_events_tree = ttk.Treeview(
+        today_events_table_frame,
+        columns=("time", "summary"),
+        show="headings",
+        height=4,
+        style="BookTimer.Treeview",
+    )
+    today_events_tree.heading("time", text=TODAY_EVENTS_TIME_HEADING)
+    today_events_tree.heading("summary", text=TODAY_EVENTS_SUMMARY_HEADING)
+    today_events_tree.column("time", width=150, minwidth=100, stretch=False)
+    today_events_tree.column("summary", width=330, minwidth=180, stretch=True)
+    today_events_tree.grid(row=0, column=0, sticky="ew")
+
+    today_events_scrollbar = ttk.Scrollbar(
+        today_events_table_frame,
+        orient="vertical",
+        command=today_events_tree.yview,
+    )
+    today_events_scrollbar.grid(row=0, column=1, sticky="ns")
+    today_events_tree.configure(yscrollcommand=today_events_scrollbar.set)
+    today_events_tree.insert(
+        "",
+        "end",
+        values=("", TODAY_EVENTS_NOT_LOADED_TEXT),
+    )
+
     reading_history_frame = tk.LabelFrame(root, text=READING_HISTORY_TITLE, padx=12, pady=12)
     reading_history_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
     reading_history_frame.columnconfigure(0, weight=1)
@@ -695,10 +553,13 @@ def run_app() -> None:
             calendar_poll_id = None
         calendar_poll_id = root.after(delay_ms, process_calendar_result)
 
-    def set_calendar_registration_state(is_running: bool) -> None:
-        nonlocal calendar_registration_in_progress
-        calendar_registration_in_progress = is_running
+    def set_calendar_operation_state(is_running: bool) -> None:
+        nonlocal calendar_operation_in_progress
+        calendar_operation_in_progress = is_running
         register_calendar_button.config(state="disabled" if is_running else "normal")
+        refresh_today_events_button.config(
+            state="disabled" if is_running else "normal"
+        )
         set_start_now_button.config(state="disabled" if is_running else "normal")
         shift_dates_next_day_button.config(
             state="disabled" if is_running else "normal"
@@ -831,6 +692,25 @@ def run_app() -> None:
         for entry in reading_history:
             reading_history_listbox.insert(tk.END, format_reading_history_entry(entry))
 
+    def refresh_today_events_display(events: list[CalendarEvent]) -> None:
+        for item_id in today_events_tree.get_children():
+            today_events_tree.delete(item_id)
+
+        if not events:
+            today_events_tree.insert(
+                "",
+                "end",
+                values=("", TODAY_EVENTS_EMPTY_TEXT),
+            )
+            return
+
+        for event in events:
+            today_events_tree.insert(
+                "",
+                "end",
+                values=build_calendar_event_row(event),
+            )
+
     def add_reading_history_entry() -> None:
         try:
             book_title = parse_book_title(book_title_var.get())
@@ -894,11 +774,29 @@ def run_app() -> None:
                     end_page=end_page,
                 )
             except GoogleCalendarIntegrationError as exc:
-                calendar_result_queue.put(("error", str(exc)))
+                calendar_result_queue.put(("registration_error", str(exc)))
             except Exception:
-                calendar_result_queue.put(("error", CALENDAR_UNEXPECTED_ERROR_TEXT))
+                calendar_result_queue.put(
+                    ("registration_error", CALENDAR_UNEXPECTED_ERROR_TEXT)
+                )
             else:
-                calendar_result_queue.put(("success", ""))
+                calendar_result_queue.put(("registration_success", ""))
+
+        threading.Thread(target=worker, daemon=True).start()
+        schedule_calendar_result_poll(CALENDAR_RESULT_POLL_MS)
+
+    def start_today_events_worker() -> None:
+        def worker() -> None:
+            try:
+                events = get_today_events()
+            except GoogleCalendarIntegrationError as exc:
+                calendar_result_queue.put(("events_error", str(exc)))
+            except Exception:
+                calendar_result_queue.put(
+                    ("events_error", TODAY_EVENTS_UNEXPECTED_ERROR_TEXT)
+                )
+            else:
+                calendar_result_queue.put(("events_success", events))
 
         threading.Thread(target=worker, daemon=True).start()
         schedule_calendar_result_poll(CALENDAR_RESULT_POLL_MS)
@@ -958,15 +856,28 @@ def run_app() -> None:
         try:
             result_kind, payload = calendar_result_queue.get_nowait()
         except queue.Empty:
-            if calendar_registration_in_progress:
+            if calendar_operation_in_progress:
                 schedule_calendar_result_poll(CALENDAR_RESULT_POLL_MS)
             return
 
-        set_calendar_registration_state(False)
+        set_calendar_operation_state(False)
 
-        if result_kind == "error":
-            error_var.set(payload)
+        if result_kind.endswith("_error"):
+            error_var.set(str(payload))
             calendar_status_var.set("")
+            return
+
+        if result_kind == "events_success":
+            events = payload if isinstance(payload, list) else []
+            refresh_today_events_display(events)
+            refreshed_at = datetime.now()
+            today_events_date_var.set(
+                f"{refreshed_at.year}年{refreshed_at.month}月{refreshed_at.day}日"
+            )
+            calendar_status_var.set(
+                f"{TODAY_EVENTS_SUCCESS_TEXT}（{len(events)}件）"
+            )
+            error_var.set("")
             return
 
         calendar_status_var.set(CALENDAR_SUCCESS_TEXT)
@@ -1006,7 +917,7 @@ def run_app() -> None:
             return
 
     def register_calendar_event() -> None:
-        if calendar_registration_in_progress:
+        if calendar_operation_in_progress:
             return
 
         calendar_status_var.set(CALENDAR_PROGRESS_TEXT)
@@ -1032,7 +943,7 @@ def run_app() -> None:
                 start_page,
                 end_page,
             )
-            set_calendar_registration_state(True)
+            set_calendar_operation_state(True)
             start_calendar_registration_worker(
                 book_title=calendar_book_title,
                 session_date=start_date,
@@ -1045,6 +956,15 @@ def run_app() -> None:
             error_var.set(str(exc))
             calendar_status_var.set("")
             return
+
+    def refresh_today_events() -> None:
+        if calendar_operation_in_progress:
+            return
+
+        calendar_status_var.set(TODAY_EVENTS_PROGRESS_TEXT)
+        error_var.set("")
+        set_calendar_operation_state(True)
+        start_today_events_worker()
 
     def update_progress() -> None:
         nonlocal scheduled_update_id
@@ -1136,6 +1056,8 @@ def run_app() -> None:
     root.after(0, adjust_layout)
     root.after(0, refresh_reading_history_display)
     root.after(0, restore_saved_session)
+    if has_cached_calendar_credentials():
+        root.after(0, refresh_today_events)
     root.protocol("WM_DELETE_WINDOW", handle_close)
     book_title_combobox.focus_set()
     root.mainloop()

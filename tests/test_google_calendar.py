@@ -78,6 +78,39 @@ class DummyCalendarService:
         return DummyEventsResource(self.error)
 
 
+class DummyListRequest:
+    def __init__(
+        self,
+        response: dict | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.response = response or {}
+        self.error = error
+
+    def execute(self):
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+
+class DummyListEventsResource:
+    def __init__(self, responses: list[dict]) -> None:
+        self.responses = responses
+        self.calls: list[dict] = []
+
+    def list(self, **kwargs):
+        self.calls.append(kwargs)
+        return DummyListRequest(self.responses[len(self.calls) - 1])
+
+
+class DummyListCalendarService:
+    def __init__(self, responses: list[dict]) -> None:
+        self.events_resource = DummyListEventsResource(responses)
+
+    def events(self):
+        return self.events_resource
+
+
 def install_auth_stubs(monkeypatch):
     monkeypatch.setattr(
         google_calendar,
@@ -214,3 +247,92 @@ def test_create_calendar_event_rejects_non_positive_duration():
         assert "終了日時は開始日時より後" in str(exc)
     else:
         raise AssertionError("GoogleCalendarIntegrationError was not raised")
+
+
+def test_get_today_events_uses_local_day_and_reads_all_pages(monkeypatch):
+    service = DummyListCalendarService(
+        [
+            {
+                "items": [
+                    {
+                        "summary": "祝日",
+                        "start": {"date": "2026-07-11"},
+                        "end": {"date": "2026-07-12"},
+                    },
+                    {
+                        "summary": "朝会",
+                        "start": {"dateTime": "2026-07-11T01:00:00Z"},
+                        "end": {"dateTime": "2026-07-11T02:00:00Z"},
+                    },
+                    {
+                        "summary": "中止",
+                        "status": "cancelled",
+                        "start": {"dateTime": "2026-07-11T03:00:00Z"},
+                        "end": {"dateTime": "2026-07-11T04:00:00Z"},
+                    },
+                ],
+                "nextPageToken": "next-page",
+            },
+            {
+                "items": [
+                    {
+                        "start": {"dateTime": "2026-07-11T15:00:00+09:00"},
+                        "end": {"dateTime": "2026-07-11T15:30:00+09:00"},
+                    }
+                ]
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        google_calendar,
+        "_import_google_calendar_client",
+        lambda: (lambda *args, **kwargs: service, RuntimeError),
+    )
+    monkeypatch.setattr(
+        google_calendar,
+        "_load_credentials",
+        lambda *args, **kwargs: object(),
+    )
+    japan_timezone = timezone(timedelta(hours=9))
+
+    events = google_calendar.get_today_events(
+        now=google_calendar.datetime(
+            2026,
+            7,
+            11,
+            12,
+            0,
+            tzinfo=japan_timezone,
+        )
+    )
+
+    assert [event.summary for event in events] == ["祝日", "朝会", "(タイトルなし)"]
+    assert events[0].is_all_day is True
+    assert events[1].start == google_calendar.datetime(
+        2026,
+        7,
+        11,
+        10,
+        0,
+        tzinfo=japan_timezone,
+    )
+    assert service.events_resource.calls[0] == {
+        "calendarId": "primary",
+        "timeMin": "2026-07-11T00:00:00+09:00",
+        "timeMax": "2026-07-12T00:00:00+09:00",
+        "singleEvents": True,
+        "orderBy": "startTime",
+        "showDeleted": False,
+        "maxResults": 2500,
+    }
+    assert service.events_resource.calls[1]["pageToken"] == "next-page"
+
+
+def test_has_cached_calendar_credentials_checks_requested_token_path(tmp_path):
+    token_path = tmp_path / "token.json"
+
+    assert google_calendar.has_cached_calendar_credentials(token_path) is False
+
+    token_path.write_text("{}", encoding="utf-8")
+
+    assert google_calendar.has_cached_calendar_credentials(token_path) is True

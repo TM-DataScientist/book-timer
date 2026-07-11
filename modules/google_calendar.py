@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, time, timedelta, tzinfo
 from pathlib import Path
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
@@ -22,6 +23,89 @@ DEPENDENCY_MESSAGE = (
 
 class GoogleCalendarIntegrationError(RuntimeError):
     """Raised when Google Calendar integration cannot proceed."""
+
+
+@dataclass(frozen=True)
+class CalendarEvent:
+    """A calendar event normalized for display by the application."""
+
+    summary: str
+    start: datetime | None
+    end: datetime | None
+    is_all_day: bool
+
+
+def get_today_events(
+    *,
+    now: datetime | None = None,
+    calendar_id: str = DEFAULT_CALENDAR_ID,
+    credentials_path: Path = DEFAULT_CREDENTIALS_PATH,
+    token_path: Path = DEFAULT_TOKEN_PATH,
+) -> list[CalendarEvent]:
+    """Return events overlapping the local calendar day containing ``now``."""
+    current_time = now or datetime.now().astimezone()
+    if current_time.tzinfo is None:
+        current_time = current_time.astimezone()
+
+    local_timezone = current_time.tzinfo
+    if local_timezone is None:
+        raise GoogleCalendarIntegrationError(
+            "ローカルタイムゾーンを取得できませんでした。"
+        )
+
+    day_start = datetime.combine(
+        current_time.date(),
+        time.min,
+        tzinfo=local_timezone,
+    )
+    day_end = day_start + timedelta(days=1)
+    service, http_error = _build_calendar_service(credentials_path, token_path)
+    events: list[CalendarEvent] = []
+    page_token: str | None = None
+
+    try:
+        while True:
+            request_parameters = {
+                "calendarId": calendar_id,
+                "timeMin": _to_rfc3339(day_start),
+                "timeMax": _to_rfc3339(day_end),
+                "singleEvents": True,
+                "orderBy": "startTime",
+                "showDeleted": False,
+                "maxResults": 2500,
+            }
+            if page_token:
+                request_parameters["pageToken"] = page_token
+
+            response = service.events().list(**request_parameters).execute()
+            for event_data in response.get("items", []):
+                calendar_event = _normalize_calendar_event(
+                    event_data,
+                    local_timezone,
+                )
+                if calendar_event is not None:
+                    events.append(calendar_event)
+
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+    except http_error as exc:
+        raise GoogleCalendarIntegrationError(
+            "今日の予定を取得できませんでした。認証設定とネットワークを確認してください。"
+        ) from exc
+    except Exception as exc:
+        raise GoogleCalendarIntegrationError(
+            "今日の予定の取得中にエラーが発生しました。認証設定とネットワークを確認してください。"
+        ) from exc
+
+    return events
+
+
+def has_cached_calendar_credentials(
+    token_path: Path = DEFAULT_TOKEN_PATH,
+) -> bool:
+    """Return whether a saved OAuth token is available for automatic loading."""
+    return token_path.is_file()
 
 
 def create_reading_event(
@@ -107,9 +191,7 @@ def _insert_event_body(
     token_path: Path,
 ) -> str:
     """Insert a prepared event body into Google Calendar and return its link."""
-    build, http_error = _import_google_calendar_client()
-    credentials = _load_credentials(credentials_path, token_path)
-    service = build("calendar", "v3", credentials=credentials, cache_discovery=False)
+    service, http_error = _build_calendar_service(credentials_path, token_path)
 
     try:
         event = service.events().insert(calendarId=calendar_id, body=event_body).execute()
@@ -123,6 +205,69 @@ def _insert_event_body(
         ) from exc
 
     return str(event.get("htmlLink", ""))
+
+
+def _build_calendar_service(credentials_path: Path, token_path: Path):
+    """Create an authenticated Calendar API service and its HTTP error type."""
+    build, http_error = _import_google_calendar_client()
+    credentials = _load_credentials(credentials_path, token_path)
+    service = build(
+        "calendar",
+        "v3",
+        credentials=credentials,
+        cache_discovery=False,
+    )
+    return service, http_error
+
+
+def _normalize_calendar_event(
+    event_data: dict,
+    local_timezone: tzinfo,
+) -> CalendarEvent | None:
+    """Convert a Calendar API event resource into a display-safe value."""
+    if event_data.get("status") == "cancelled":
+        return None
+
+    summary = str(event_data.get("summary") or "").strip() or "(タイトルなし)"
+    start_data = event_data.get("start") or {}
+    end_data = event_data.get("end") or {}
+
+    if start_data.get("date"):
+        return CalendarEvent(
+            summary=summary,
+            start=None,
+            end=None,
+            is_all_day=True,
+        )
+
+    start = _parse_event_datetime(start_data.get("dateTime"), local_timezone)
+    if start is None:
+        return None
+
+    return CalendarEvent(
+        summary=summary,
+        start=start,
+        end=_parse_event_datetime(end_data.get("dateTime"), local_timezone),
+        is_all_day=False,
+    )
+
+
+def _parse_event_datetime(
+    value: object,
+    local_timezone: tzinfo,
+) -> datetime | None:
+    """Parse an RFC3339 event timestamp and convert it to local time."""
+    if not isinstance(value, str):
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=local_timezone)
+    return parsed.astimezone(local_timezone)
 
 
 def _load_credentials(credentials_path: Path, token_path: Path):

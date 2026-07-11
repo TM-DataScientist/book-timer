@@ -1,138 +1,140 @@
-﻿# Reading Books Timer
+# Book Timer
 
-デジタルと紙の読書時間を記録し、進捗をリアルタイムで可視化する Tkinter 製のタイマーです。書名・日付・開始終了時刻・ページ数を入力すると、現在どこまで読めているかを分単位で推定し、Googleカレンダーへ登録したり、読了履歴を Parquet で残したりできます。
+読書セッションの予定、進捗、読了履歴、Googleカレンダーをまとめて扱うローカルWebアプリです。Reactの画面をFastAPIが配信し、サーバーは `127.0.0.1` のみに公開します。
 
-## スクリーンショット
-![Reading Timer screenshot](assets/image.png)
+## 主な機能
 
-## 主な特徴
-- 書名・日付・開始終了時刻・ページ範囲を入力するだけで読書セッションをセットアップ
-- 保存済みの書名をドロップダウンから選択可能
-- 開始前・終了後の状態を自動判定し、残り時間や最終ページをガイド
-- 1 分ごとに推定ページを自動更新
-- ウィンドウを閉じても前回の書名・日時・ページ入力を次回起動時に復元
-- 読了リストを保存し、最新読了と履歴一覧を表示可能
-- Googleカレンダーへ読書予定を登録可能
-- 読了履歴を `data/reading_history.parquet` に保存し、Notebook から確認可能
-- タイマー本体は追加ライブラリ不要（Googleカレンダー連携と読了履歴の Parquet 出力時のみ追加インストールが必要）
+- 書名、開始・終了日時、ページ範囲から読書セッションを設定
+- 現在時刻に応じた推定ページ、進捗率、残り時間をリアルタイム表示
+- 入力内容と書名候補を自動保存し、次回起動時に復元
+- 読了履歴の追加・削除と、累計・年別・月別冊数の表示
+- Googleカレンダーへの読書予定登録
+- Googleカレンダーの今日の予定を、終日・時刻付きで一覧表示
+- `24:00` や `25:00` など翌日扱いの時刻に対応
+- デスクトップ、タブレット、モバイル幅に対応
 
-## 動作環境
-- Python 3.10 以降推奨（Tkinter 同梱版）
-- Windows 10/11 で動作確認済み
+## 構成
+
+```text
+book-timer/
+├─ frontend/                  # React + TypeScript + Vite
+│  ├─ src/
+│  │  ├─ components/
+│  │  ├─ api.ts
+│  │  ├─ App.tsx
+│  │  └─ styles.css
+│  └─ package.json
+├─ modules/
+│  ├─ google_calendar.py     # Google Calendar API
+│  ├─ reading_history_store.py
+│  ├─ reading_session.py     # UI非依存のセッションロジック
+│  └─ session_state.py
+├─ tests/
+├─ web_app.py                # FastAPI + React配信
+├─ start_web_app.cmd         # Web版の起動
+└─ book_timer.py             # 移行確認用のTkinter版
+```
+
+## 必要環境
+
+- Python 3.10以降
+- [uv](https://docs.astral.sh/uv/)
+- Node.js 20以降とnpm
 
 ## セットアップ
+
 ```powershell
 uv sync
+cd frontend
+npm install
+npm run build
+cd ..
 ```
 
-ランタイム依存関係だけでよい場合:
+## 起動
+
+Windowsでは、リポジトリ直下の `start_web_app.cmd` をダブルクリックします。依存関係が未導入の場合は自動でセットアップし、フロントエンドをビルドしてからブラウザを開きます。
+
+PowerShellから起動する場合:
+
 ```powershell
-uv sync --no-dev
+uv run python web_app.py
 ```
 
-- `uv sync` は `.venv` の作成も兼ねます
-- Tkinter は Windows の CPython に同梱される前提です
-- Googleカレンダー連携と読了履歴 Parquet 出力の依存関係は `pyproject.toml` で管理しています
+起動後のURL:
 
-## 起動方法
-通常の実行:
+```text
+http://127.0.0.1:8000
+```
+
+サーバーはローカルループバックにだけバインドされ、LANやインターネットには公開されません。停止するときは起動したターミナルで `Ctrl+C` を押します。
+
+## 開発
+
+バックエンドとフロントエンドを別々に起動すると、Reactの変更が即時反映されます。
+
+ターミナル1:
+
+```powershell
+uv run uvicorn web_app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+ターミナル2:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+開発画面は `http://127.0.0.1:5173`、API仕様は `http://127.0.0.1:8000/api/docs` で確認できます。
+
+## Googleカレンダー連携
+
+1. Google CloudでGoogle Calendar APIを有効化
+2. OAuthクライアントを `Desktop app` として作成
+3. ダウンロードしたJSONをリポジトリ直下へ配置
+   - `credentials.json`
+   - または `client_secret_...json`
+4. Web画面の「今日の予定」の更新、または「予定を登録」を実行
+5. 初回だけブラウザでGoogleアカウントへのアクセスを許可
+
+認証後は `token.json` が作成され、次回以降は再利用されます。予定の取得対象はログインしたアカウントのprimaryカレンダーです。
+
+`credentials.json`、`client_secret_...json`、`token.json` は `.gitignore` の対象です。Reactへ認証情報やOAuthトークンを渡すことはありません。
+
+## データ保存
+
+- 入力内容・書名候補: `.book_timer_state.json`
+- 読了履歴: `data/reading_history.parquet`
+- Google OAuthトークン: `token.json`
+
+既存のTkinter版と同じファイルを利用するため、過去の入力内容と読了履歴をそのままWeb版へ引き継げます。
+
+## テスト
+
+Python:
+
+```powershell
+uv run pytest -p no:cacheprovider
+```
+
+Reactの型チェックと本番ビルド:
+
+```powershell
+cd frontend
+npm run build
+```
+
+## Tkinter版
+
+移行結果の比較用として従来版も残しています。
+
 ```powershell
 uv run python book_timer.py
 ```
 
-または:
-```powershell
-uv run python -m book_timer
-```
-
-ダブルクリック起動:
-- ルートの `start_book_timer.cmd` をダブルクリックすると、`book_timer.py` を起動できます
-- `.venv\Scripts\python.exe` があればそれを優先し、なければ `py -3` または `python` を使います
-- Python が見つからない場合は、エラーメッセージを表示したまま停止します
-
-VSCode から起動:
-- `Ctrl+Shift+P` → `Tasks: Run Task` → `Run Book Timer` で起動できます
-- 設定ファイルは `.vscode/tasks.json` です
-
-デスクトップショートカット作成:
-```powershell
-powershell -ExecutionPolicy Bypass -File .\create_book_timer_shortcut.ps1
-```
-- 実行後、デスクトップに `Book Timer` ショートカットが作成されます
-- ショートカットは `start_book_timer.cmd` を参照するため、普段はデスクトップから起動できます
-
-## 使い方
-1. ウィンドウ上で書名・日付（`YYYY-MM-DD`、初期値は起動日）・開始時刻（初期値 `08:00`）・終了時刻（初期値 `24:00`）・開始ページ・終了ページを入力
-   終了時刻には `24:00` や `25:00` のような翌日扱いの時刻も使えます
-2. 書名を入力して `反映` `読了リストに追加` または `Googleカレンダーに登録` を行うと、その書名が次回以降の候補として保存されます
-3. 保存済みの書名はドロップダウンから選択でき、不要になった書名は `削除` で一覧から消せます
-4. 進捗ラベルに推定ページが表示され、1 分ごとに更新
-5. `読了リストに追加` を押すと、日付と書名が読了リストへ保存され、最新読了と一覧に反映
-6. `Googleカレンダーに登録` を押すと、書名とページ範囲を含む予定を Google カレンダーへ登録
-7. ウィンドウを閉じると現在の入力内容を保存し、次回起動時に復元
-8. 終了予定時刻を過ぎると最終ページ確認のメッセージを表示
-
-## 読了履歴
-- 読了履歴は `data/reading_history.parquet` に保存されます
-- 既存の `.book_timer_state.json` にある旧形式の読了履歴は、初回起動時に自動で Parquet へ移行されます
-- `notebooks/reading_history.ipynb` を開くと、Pandas で読了履歴を確認できます
-
-## Googleカレンダー連携
-1. Google Cloud でプロジェクトを作成し、Google Calendar API を有効化
-2. OAuth クライアントを `Desktop app` で作成
-3. ダウンロードした OAuth クライアント JSON を、このリポジトリ直下に配置
-   `credentials.json` でも、Google が生成した `client_secret_...json` のままでも読み取れます
-4. アプリから `Googleカレンダーに登録` を押し、初回のみブラウザでログインして許可
-5. 認証後は `token.json` が自動作成され、以後は再利用
-
-- 認証情報ファイルの `credentials.json` と `token.json` は `.gitignore` 済みです
-- Google からダウンロードした OAuth クライアント JSON も `.gitignore` 済みです
-- 入力内容の復元用ファイル `.book_timer_state.json` も `.gitignore` 済みです
-- `.book_timer_state.json` には前回入力した値と書名候補一覧が保存されます
-- 認証に失敗した場合は `token.json` を削除してやり直してください
-
-## プロジェクト構成
-```
-reading_books_timer/
-├─ book_timer.py      # エントリーポイント（ロジック + Tkinter UI）
-├─ start_book_timer.cmd
-├─ create_book_timer_shortcut.ps1
-├─ .vscode/
-│  └─ tasks.json
-├─ modules/
-│  ├─ google_calendar.py   # Google Calendar API 連携
-│  ├─ reading_history_store.py   # 読了履歴の Parquet 保存
-│  └─ session_state.py     # 入力内容の保存と復元
-├─ notebooks/
-│  └─ reading_history.ipynb
-└─ assets/            # 画像・フォント・CSV 等のリソース（必要に応じて作成）
-```
-
-- ロジック関数（時間計算やページ推定）はファイル冒頭付近にまとめ、Tkinter ウィジェット組み立ては末尾に配置する方針です。
-- 新しい計算ヘルパーや設定値は `modules/` に分割し、`book_timer.py` からインポートしてください。
-
-## 開発メモ
-- コードスタイル: PEP 8（4 スペースインデント、snake_case 変数・関数、PascalCase クラス）
-- ユーザーに表示する文字列は重複させず、再利用しやすく管理
-- テキストは UTF-8（日本語＋英語混在可）
-
-### テスト & 検証
-- メイン: 手動検証  
-  `uv run python book_timer.py` を実行し、開始前／進行中／終了後で表示が正しいか確認  
-  `24:00` や `25:00` 指定時にクラッシュせず継続することも確認
-- 自動テスト（任意）: `tests/test_*.py` を追加し、計算関数を GUI から切り離して検証  
-  ```powershell
-  uv run pytest
-  ```
-
-## 今後のアイデア
-- 休憩リマインダーの追加
-- CSV やグラフへのセッション履歴エクスポート
-- GUI のテーマやアイコンカスタマイズ（`assets/` フォルダ活用）
+新規機能はWeb版へ追加する方針です。
 
 ## ライセンス
-- MIT License ([LICENSE](LICENSE))
 
-
-
-
+MIT License
